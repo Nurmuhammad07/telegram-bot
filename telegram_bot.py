@@ -2539,6 +2539,19 @@ async def admin_add_item(query, context, item_id):
         
         user_items[target_user_id]['role_expiry'][role_name] = int(time.time()) + (30 * 24 * 60 * 60)  # 30 дней
     
+    # Проверяем, требует ли предмет ввода от пользователя
+    requires_input = False
+    input_instructions = ""
+    
+    if item_id == 'custom_nickname' or item['name'] == '📝 Смена никнейма':
+        user_items[target_user_id]['awaiting_nickname'] = True
+        requires_input = True
+        input_instructions = "Отправьте боту новый никнейм (максимум 20 символов)."
+    elif item_id == 'custom_status' or item['name'] == '📝 Смена статуса':
+        user_items[target_user_id]['awaiting_status'] = True
+        requires_input = True
+        input_instructions = "Отправьте боту новый статус (максимум 50 символов)."
+    
     if item['duration'] > 1:
         # Для предметов с длительностью
         expiration = current_time + timedelta(days=item['duration'])
@@ -2560,8 +2573,12 @@ async def admin_add_item(query, context, item_id):
     # Отправляем уведомление пользователю
     try:
         message_text = f"🎁 {admin_name} ({admin_role}) добавил вам предмет: {item['name']}!"
+        
         if role_name:
             message_text += f"\n\n🎖️ Вам также назначена роль: {USER_ROLES[role_name]['name']}!\nТеперь у вас есть доступ к дополнительным функциям бота."
+        
+        if requires_input:
+            message_text += f"\n\n✏️ Для использования предмета: {input_instructions}"
         
         await context.bot.send_message(
             chat_id=target_user_id,
@@ -2580,6 +2597,8 @@ async def admin_add_item(query, context, item_id):
     success_message = f"✅ Предмет {item['name']} успешно добавлен пользователю {user_name} (ID: {target_user_id})!"
     if role_name:
         success_message += f"\n\n🎖️ Пользователю также назначена роль: {USER_ROLES[role_name]['name']}!"
+    if requires_input:
+        success_message += f"\n\n✏️ Пользователю отправлена инструкция по использованию предмета."
     
     await query.edit_message_text(
         success_message,
