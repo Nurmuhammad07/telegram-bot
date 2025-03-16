@@ -3474,8 +3474,8 @@ async def show_upcoming_matches_with_odds(query: CallbackQuery):
     # Получаем текущие матчи
     matches = await fetch_matches()
     
-    # Фильтруем только запланированные матчи
-    scheduled_matches = [m for m in matches if m['status'] == 'SCHEDULED']
+    # Фильтруем только предстоящие матчи (не LIVE, не IN_PLAY, не PAUSED, не FINISHED)
+    scheduled_matches = [m for m in matches if m['status'] not in ['LIVE', 'IN_PLAY', 'PAUSED', 'FINISHED']]
     
     if not scheduled_matches:
         await query.edit_message_text(
