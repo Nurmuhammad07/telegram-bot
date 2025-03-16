@@ -2093,6 +2093,8 @@ async def handle_admin_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
                             user_roles.pop(user_id, None)
                             user_items[user_id]['role_expiry'].pop(role, None)
                             save_user_data(user_currency, user_predictions, user_names, user_items, user_statuses, user_nicknames, user_roles)
+                            await update.message.reply_text("❌ Срок действия вашей роли истек!")
+                            return
                         else:
                             has_access = True
                     else:
@@ -2516,6 +2518,27 @@ async def admin_add_item(query, context, item_id):
     item = SHOP_ITEMS[item_id]
     current_time = datetime.now(pytz.UTC)
     
+    # Проверяем, связан ли предмет с ролью
+    role_name = None
+    if item_id == 'role_admin' or item['name'] == '🔐 Admin':
+        role_name = 'admin'
+    elif item_id == 'role_moderator' or item['name'] == '🛡️ Moderator':
+        role_name = 'moderator'
+    elif item_id == 'role_operator' or item['name'] == '🔧 Operator':
+        role_name = 'operator'
+    
+    # Если предмет связан с ролью, назначаем её пользователю
+    if role_name:
+        user_roles[target_user_id] = role_name
+        
+        # Добавляем срок действия роли (30 дней)
+        if 'role_expiry' not in user_items.get(target_user_id, {}):
+            if target_user_id not in user_items:
+                user_items[target_user_id] = {}
+            user_items[target_user_id]['role_expiry'] = {}
+        
+        user_items[target_user_id]['role_expiry'][role_name] = int(time.time()) + (30 * 24 * 60 * 60)  # 30 дней
+    
     if item['duration'] > 1:
         # Для предметов с длительностью
         expiration = current_time + timedelta(days=item['duration'])
@@ -2536,9 +2559,13 @@ async def admin_add_item(query, context, item_id):
     
     # Отправляем уведомление пользователю
     try:
+        message_text = f"🎁 {admin_name} ({admin_role}) добавил вам предмет: {item['name']}!"
+        if role_name:
+            message_text += f"\n\n🎖️ Вам также назначена роль: {USER_ROLES[role_name]['name']}!\nТеперь у вас есть доступ к дополнительным функциям бота."
+        
         await context.bot.send_message(
             chat_id=target_user_id,
-            text=f"🎁 {admin_name} ({admin_role}) добавил вам предмет: {item['name']}!"
+            text=message_text
         )
     except Exception as e:
         logger.error(f"Ошибка отправки уведомления пользователю: {str(e)}")
@@ -2550,8 +2577,12 @@ async def admin_add_item(query, context, item_id):
     context.user_data.pop('admin_state', None)
     context.user_data.pop('target_user_id', None)
     
+    success_message = f"✅ Предмет {item['name']} успешно добавлен пользователю {user_name} (ID: {target_user_id})!"
+    if role_name:
+        success_message += f"\n\n🎖️ Пользователю также назначена роль: {USER_ROLES[role_name]['name']}!"
+    
     await query.edit_message_text(
-        f"✅ Предмет {item['name']} успешно добавлен пользователю {user_name} (ID: {target_user_id})!",
+        success_message,
         reply_markup=InlineKeyboardMarkup([[
             InlineKeyboardButton("🔙 Назад к админ-панели", callback_data='admin_panel')
         ]])
@@ -3144,7 +3175,26 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif user_id in user_roles:
         role = user_roles[user_id]
         if role in ['developer', 'admin', 'moderator', 'operator']:
-            has_access = True
+            # Проверяем, не истек ли срок действия роли
+            if role != 'developer':  # Developer не имеет срока действия
+                if user_id in user_items and 'role_expiry' in user_items[user_id]:
+                    if role in user_items[user_id]['role_expiry']:
+                        expiry_time = user_items[user_id]['role_expiry'][role]
+                        if int(time.time()) > expiry_time:
+                            # Роль истекла, удаляем её
+                            user_roles.pop(user_id, None)
+                            user_items[user_id]['role_expiry'].pop(role, None)
+                            save_user_data(user_currency, user_predictions, user_names, user_items, user_statuses, user_nicknames, user_roles)
+                            await update.message.reply_text("❌ Срок действия вашей роли истек!")
+                            return
+                        else:
+                            has_access = True
+                    else:
+                        has_access = True
+                else:
+                    has_access = True
+            else:
+                has_access = True
     
     if not has_access:
         await query.answer("❌ У вас нет доступа к панели администратора!")
