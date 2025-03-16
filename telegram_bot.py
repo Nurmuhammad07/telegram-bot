@@ -880,6 +880,1774 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Для VIP пользователей - все текущие матчи
             available_matches = [m for m in matches if m['status'] in ['SCHEDULED', 'LIVE', 'IN_PLAY', 'PAUSED']]
         else:
+            # Для обычных пользователей - только предстоящие матчи (не LIVE, не IN_PLAY, не PAUSED, не FINISHED)
+            available_matches = [m for m in matches if m['status'] not in ['LIVE', 'IN_PLAY', 'PAUSED', 'FINISHED']]
+        
+        if not available_matches:
+            await query.edit_message_text(
+                "❌ Сейчас нет доступных матчей для прогноза!",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Назад", callback_data='back_to_main')]])
+            )
+            return
+        
+        # Создаем клавиатуру с доступными матчами
+        keyboard = []
+        for match in available_matches:
+            button_text = f"{match['home']} vs {match['away']} ({match['date']} {match['time']})"
+            callback_data = f"predict_{match['home']}_{match['away']}"
+            keyboard.append([InlineKeyboardButton(button_text, callback_data=callback_data)])
+        
+        # Добавляем кнопку возврата
+        keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data='back_to_main')])
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        # Формируем сообщение с информацией о системе наград
+        message = (
+            "⚽️ Выберите матч для прогноза:\n"
+            f"💰 Стоимость прогноза: {PREDICTION_COST} монет\n\n"
+            "🏆 Система наград:\n"
+            f"• Точный счёт: {PREDICTION_REWARD_EXACT} монет\n"
+            f"• Правильная разница голов: {PREDICTION_REWARD_DIFF} монет\n"
+            f"• Правильный исход: {PREDICTION_REWARD_OUTCOME} монет\n\n"
+            "🌟 Топовые матчи дают повышенные награды!"
+        )
+        
+        if has_vip:
+            message += "\n✨ У вас есть VIP-прогноз! Вы можете прогнозировать текущие матчи."
+        
+        await query.edit_message_text(message, reply_markup=reply_markup)
+    
+    elif query.data == 'show_shop':
+        # Показываем категории магазина
+        keyboard = []
+        categories = {
+            'boosters': '🎯 Бустеры',
+            'game': '🎮 Игровые возможности',
+            'football': '⚽️ Футбольные привилегии',
+            'roles': '🔰 Роли и префиксы'
+        }
+        
+        for category, title in categories.items():
+            keyboard.append([InlineKeyboardButton(title, callback_data=f'shop_category_{category}')])
+        
+        keyboard.append([InlineKeyboardButton("🔙 Главное меню", callback_data='back_to_main')])
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            "🏪 Добро пожаловать в магазин!\n"
+            "Выберите категорию товаров:",
+            reply_markup=reply_markup
+        )
+    
+    elif query.data.startswith('stats_'):
+        # Обработка запроса расширенной статистики
+        user_id = str(query.from_user.id)
+        if not has_active_item(user_id, 'extended_stats'):
+            await query.answer("❌ У вас нет доступа к расширенной статистике!")
+            return
+        
+        _, home_team, away_team = query.data.split('_')
+        matches = await fetch_matches()
+        current_match = None
+        
+        for match in matches:
+            if match['home'] == home_team and match['away'] == away_team:
+                current_match = match
+                break
+        
+        if not current_match:
+            await query.answer("❌ Матч не найден!")
+            return
+        
+        # Формируем расширенную статистику (демо-данные)
+        stats = {
+            'possession': {'home': 55, 'away': 45},
+            'shots': {'home': 12, 'away': 8},
+            'shots_on_target': {'home': 5, 'away': 3},
+            'corners': {'home': 6, 'away': 4},
+            'fouls': {'home': 10, 'away': 12},
+            'yellow_cards': {'home': 2, 'away': 3},
+            'red_cards': {'home': 0, 'away': 0}
+        }
+        
+        text = f"📊 Расширенная статистика матча\n\n"
+        text += f"⚽️ {home_team} {current_match['score']} {away_team}\n"
+        text += f"🏆 {current_match['competition']}\n\n"
+        
+        text += f"⏱️ Владение мячом: {stats['possession']['home']}% - {stats['possession']['away']}%\n"
+        text += f"🎯 Удары: {stats['shots']['home']} - {stats['shots']['away']}\n"
+        text += f"🎯 В створ: {stats['shots_on_target']['home']} - {stats['shots_on_target']['away']}\n"
+        text += f"⛳️ Угловые: {stats['corners']['home']} - {stats['corners']['away']}\n"
+        text += f"⚠️ Фолы: {stats['fouls']['home']} - {stats['fouls']['away']}\n"
+        text += f"🟨 Желтые карточки: {stats['yellow_cards']['home']} - {stats['yellow_cards']['away']}\n"
+        text += f"🟥 Красные карточки: {stats['red_cards']['home']} - {stats['red_cards']['away']}\n"
+        
+        keyboard = [
+            [InlineKeyboardButton("🔄 Обновить", callback_data=query.data)],
+            [InlineKeyboardButton("🔙 Назад", callback_data='back_to_main')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(text, reply_markup=reply_markup)
+    
+    elif query.data == 'show_tables':
+        # Обработка запроса турнирных таблиц
+        user_id = str(query.from_user.id)
+        if not has_active_item(user_id, 'tournament_tables'):
+            await query.answer("❌ У вас нет доступа к турнирным таблицам!")
+            return
+        
+        await show_tournament_tables(query.message, context)
+    
+    elif query.data == 'show_balance':
+        user_id = str(query.from_user.id)
+        balance = await get_user_balance(user_id)
+        
+        keyboard = [
+            [InlineKeyboardButton("💸 Отправить деньги", callback_data='send_money')],
+            [InlineKeyboardButton("🔙 Назад", callback_data='back_to_main')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            f"💰 Ваш текущий баланс: {balance} монет\n\n"
+            "💡 Вы можете заработать монеты, делая точные прогнозы на матчи!",
+            reply_markup=reply_markup
+        )
+        return
+    
+    elif query.data == 'shop':
+        # Показываем категории магазина
+        keyboard = []
+        categories = {
+            'boosters': '🎯 Бустеры',
+            'game': '🎮 Игровые возможности',
+            'football': '⚽️ Футбольные привилегии',
+            'roles': '🔰 Роли и префиксы'
+        }
+        
+        for category, title in categories.items():
+            keyboard.append([InlineKeyboardButton(title, callback_data=f'shop_category_{category}')])
+        
+        keyboard.append([InlineKeyboardButton("🔙 Главное меню", callback_data='back_to_main')])
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            "🏪 Добро пожаловать в магазин!\n"
+            "Выберите категорию товаров:",
+            reply_markup=reply_markup
+        )
+    
+    elif query.data.startswith('shop_category_'):
+        # Показываем товары выбранной категории
+        category = query.data.replace('shop_category_', '')
+        await show_shop(query, category, SHOP_ITEMS)
+    
+    elif query.data.startswith('buy_'):
+        # Обработка покупки товара
+        item_id = query.data.replace('buy_', '')
+        await process_purchase_shop(query, item_id, SHOP_ITEMS, user_currency, user_items, user_statuses, user_nicknames, user_roles, update_user_balance, save_user_data)
+    
+    elif query.data == 'make_prediction':
+        # Получаем текущие матчи
+        matches = await fetch_matches()
+        live_matches = [m for m in matches if m['status'] in ['LIVE', 'IN_PLAY', 'PAUSED']]
+        
+        if not live_matches:
+            await query.answer("❌ Сейчас нет активных матчей для прогноза!")
+            return
+        
+        # Проверяем наличие VIP-прогноза
+        user_id = str(query.from_user.id)
+        has_vip = has_active_item(user_id, 'vip_predict')
+        
+        # Создаем клавиатуру с live матчами
+        keyboard = []
+        for match in live_matches:
+            button_text = f"{match['home']} {match['score']} {match['away']}"
+            callback_data = f"predict_{match['home']}_{match['away']}"
+            keyboard.append([InlineKeyboardButton(button_text, callback_data=callback_data)])
+        
+        # Добавляем кнопку возврата
+        keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data='back_to_main')])
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            "⚽️ Выберите матч для прогноза:\n"
+            f"💰 Стоимость прогноза: {PREDICTION_COST} монет\n"
+            f"🏆 Награда за точное предсказание: {PREDICTION_REWARD_EXACT} монет" +
+            ("\n✨ У вас есть VIP-прогноз!" if has_vip else ""),
+            reply_markup=reply_markup
+        )
+    
+    elif query.data.startswith('predict_'):
+        await process_prediction(update, context)
+    
+    elif query.data == 'select_all':
+        user_id = str(query.from_user.id)
+        if 'user_settings' not in config:
+            config['user_settings'] = {}
+        if user_id not in config['user_settings']:
+            config['user_settings'] = {
+                'subscribed_teams': [],
+                'goal_alerts': True,
+                'match_reminders': True
+            }
+        
+        config['user_settings'][user_id]['subscribed_teams'] = list(AVAILABLE_TEAMS.keys())
+        save_config(config)
+        await query.answer("✅ Выбраны все команды")
+        await show_settings(query.message)
+    
+    elif query.data == 'clear_all':
+        user_id = str(query.from_user.id)
+        if 'user_settings' in config and user_id in config['user_settings']:
+            config['user_settings'][user_id]['subscribed_teams'] = []
+            save_config(config)
+        await query.answer("❌ Список команд очищен")
+        await show_settings(query.message)
+        
+    elif query.data == 'divider':
+        await query.answer()
+        
+    elif query.data in ['toggle_goals', 'toggle_matches']:
+        user_id = str(query.from_user.id)
+        
+        if 'user_settings' not in config:
+            config['user_settings'] = {}
+        if user_id not in config['user_settings']:
+            config['user_settings'] = {
+                'subscribed_teams': [],
+                'goal_alerts': True,
+                'match_reminders': True
+            }
+            
+        setting_key = 'goal_alerts' if query.data == 'toggle_goals' else 'match_reminders'
+        current_value = config['user_settings'][user_id].get(setting_key, True)
+        config['user_settings'][user_id][setting_key] = not current_value
+        
+        setting_name = 'голов' if query.data == 'toggle_goals' else 'матчей'
+        status = 'включены' if not current_value else 'отключены'
+        await query.answer(f"🔔 Уведомления о {setting_name} {status}")
+        
+        save_config(config)
+        await show_settings(query.message)
+    
+    elif query.data.startswith('subscribe_'):
+        team_id = query.data.replace('subscribe_', '')
+        user_id = str(query.from_user.id)
+        
+        if 'user_settings' not in config:
+            config['user_settings'] = {}
+        if user_id not in config['user_settings']:
+            config['user_settings'] = {
+                'subscribed_teams': [],
+                'goal_alerts': True,
+                'match_reminders': True
+            }
+            
+        if team_id in config['user_settings'][user_id].get('subscribed_teams', []):
+            config['user_settings'][user_id]['subscribed_teams'].remove(team_id)
+            await query.answer(f"❌ Отписка от {AVAILABLE_TEAMS[team_id]}")
+        else:
+            if 'subscribed_teams' not in config['user_settings'][user_id]:
+                config['user_settings'][user_id]['subscribed_teams'] = []
+            config['user_settings'][user_id]['subscribed_teams'].append(team_id)
+            await query.answer(f"✅ Подписка на {AVAILABLE_TEAMS[team_id]}")
+        
+        save_config(config)
+        await show_settings(query.message)
+    
+    elif query.data == 'admin_users_list':
+        user_id = str(query.from_user.id)
+        # Проверяем, имеет ли пользователь доступ к этой функции
+        if user_id != ADMIN_ID and (user_id not in user_roles or user_roles[user_id] not in ['developer', 'admin']):
+            await query.answer("❌ У вас нет доступа к этой функции!")
+            return
+        
+        await admin_users_list(query)
+    
+    elif query.data == 'admin_stats':
+        user_id = str(query.from_user.id)
+        # Проверяем, имеет ли пользователь доступ к этой функции
+        if user_id != ADMIN_ID and (user_id not in user_roles or user_roles[user_id] not in ['developer', 'admin', 'operator']):
+            await query.answer("❌ У вас нет доступа к этой функции!")
+            return
+        
+        await admin_stats(query)
+    
+    elif query.data == 'admin_broadcast':
+        user_id = str(query.from_user.id)
+        # Проверяем, имеет ли пользователь доступ к этой функции
+        if user_id != ADMIN_ID and (user_id not in user_roles or user_roles[user_id] not in ['developer', 'admin', 'moderator', 'operator']):
+            await query.answer("❌ У вас нет доступа к этой функции!")
+            return
+        
+        await admin_broadcast(query, context)
+    
+    elif query.data == 'admin_broadcast_confirm':
+        user_id = str(query.from_user.id)
+        # Проверяем, имеет ли пользователь доступ к этой функции
+        if user_id != ADMIN_ID and (user_id not in user_roles or user_roles[user_id] not in ['developer', 'admin', 'moderator', 'operator']):
+            await query.answer("❌ У вас нет доступа к этой функции!")
+            return
+        
+        await admin_broadcast_send(query, context)
+    
+    elif query.data == 'admin_manage_items':
+        user_id = str(query.from_user.id)
+        # Проверяем, имеет ли пользователь доступ к этой функции
+        if user_id != ADMIN_ID and (user_id not in user_roles or user_roles[user_id] not in ['developer', 'admin']):
+            await query.answer("❌ У вас нет доступа к этой функции!")
+            return
+        
+        await admin_manage_items(query, context)
+    
+    elif query.data.startswith('admin_add_item_'):
+        user_id = str(query.from_user.id)
+        # Проверяем, имеет ли пользователь доступ к этой функции
+        if user_id != ADMIN_ID and (user_id not in user_roles or user_roles[user_id] not in ['developer', 'admin']):
+            await query.answer("❌ У вас нет доступа к этой функции!")
+            return
+        
+        item_id = query.data.replace('admin_add_item_', '')
+        await admin_add_item(query, context, item_id)
+    
+    elif query.data == 'admin_manage_prices':
+        user_id = str(query.from_user.id)
+        # Проверяем, имеет ли пользователь доступ к этой функции
+        if user_id != ADMIN_ID and (user_id not in user_roles or user_roles[user_id] not in ['developer', 'admin']):
+            await query.answer("❌ У вас нет доступа к этой функции!")
+            return
+        
+        await admin_manage_prices(query, context)
+    
+    elif query.data == 'show_top':
+        # Сортируем пользователей по балансу
+        sorted_users = sorted(user_currency.items(), key=lambda x: x[1], reverse=True)
+        
+        text = "🏆 Топ предсказателей:\n\n"
+        for i, (user_id, balance) in enumerate(sorted_users[:10], 1):
+            name = get_user_display_name(user_id)
+            
+            # Добавляем VIP-статус и пользовательский статус
+            vip_status = "👑 " if has_active_item(user_id, 'vip_status') else ""
+            custom_status = f"\n💭 {user_statuses[user_id]}" if user_id in user_statuses else ""
+            
+            text += f"{i}. {vip_status}{name} - {balance} монет{custom_status}\n"
+        
+        keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data='back_to_main')]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(text, reply_markup=reply_markup)
+    
+    elif query.data == 'show_help':
+        text = "ℹ️ Помощь по использованию бота:\n\n"
+        for command, description in COMMANDS.items():
+            text += f"/{command} - {description}\n"
+        
+        text += "\n🏆 Новая система наград:\n"
+        text += f"• Точный счёт: {PREDICTION_REWARD_EXACT} монет\n"
+        text += f"• Правильная разница голов: {PREDICTION_REWARD_DIFF} монет\n"
+        text += f"• Правильный исход: {PREDICTION_REWARD_OUTCOME} монет\n\n"
+        text += "🌟 Топовые матчи дают повышенные награды!\n"
+        
+        keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data='back_to_main')]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(text, reply_markup=reply_markup)
+    
+    elif query.data == 'today_matches':
+        matches = await fetch_matches()
+        if matches:
+            text = "📅 Матчи:\n\n"
+            
+            # Сначала показываем live матчи
+            live_matches = [m for m in matches if m['status'] in ['LIVE', 'IN_PLAY', 'PAUSED']]
+            if live_matches:
+                text += "🔴 LIVE МАТЧИ:\n\n"
+                for match in live_matches:
+                    home_star = "⭐️ " if match['home'] in FAVORITE_TEAMS else ""
+                    away_star = " ⭐️" if match['away'] in FAVORITE_TEAMS else ""
+                    text += f"{get_match_status_emoji(match['status'])} {home_star}{match['home']} {match['score']} {away_star}{match['away']}\n"
+                    text += f"🏆 {match['competition']}\n\n"
+            
+            # Показываем завершенные матчи
+            finished_matches = [m for m in matches if m['status'] == 'FINISHED']
+            if finished_matches:
+                text += "✅ ЗАВЕРШЕННЫЕ МАТЧИ:\n\n"
+                for match in finished_matches:
+                    home_star = "⭐️ " if match['home'] in FAVORITE_TEAMS else ""
+                    away_star = " ⭐️" if match['away'] in FAVORITE_TEAMS else ""
+                    text += f"{get_match_status_emoji(match['status'])} {home_star}{match['home']} {match['score']} {away_star}{match['away']}\n"
+                    text += f"🏆 {match['competition']}\n\n"
+            
+            # Затем показываем предстоящие матчи
+            scheduled_matches = [m for m in matches if m['status'] not in ['LIVE', 'IN_PLAY', 'PAUSED', 'FINISHED']]
+            if scheduled_matches:
+                text += "📆 ПРЕДСТОЯЩИЕ МАТЧИ:\n\n"
+                
+                # Группируем матчи по датам
+                matches_by_date = {}
+                for match in scheduled_matches:
+                    match_date = datetime.strptime(match['date'], "%d.%m.%Y").date()
+                    if match_date not in matches_by_date:
+                        matches_by_date[match_date] = []
+                    matches_by_date[match_date].append(match)
+                
+                # Сортируем даты
+                sorted_dates = sorted(matches_by_date.keys())
+                
+                # Выводим матчи по датам
+                for date in sorted_dates:
+                    text += f"\n📆 {date.strftime('%d.%m.%Y')}:\n"
+                    for match in matches_by_date[date]:
+                        home_star = "⭐️ " if match['home'] in FAVORITE_TEAMS else ""
+                        away_star = " ⭐️" if match['away'] in FAVORITE_TEAMS else ""
+                        text += f"{get_match_status_emoji(match['status'])} {home_star}{match['home']} vs {away_star}{match['away']}\n"
+                        text += f"🕒 {match['time']} (UZB)\n"
+                        text += f"🏆 {match['competition']}\n\n"
+        else:
+            text = "Матчей с участием избранных команд не найдено"
+        
+        keyboard = [[InlineKeyboardButton("🔄 Обновить", callback_data='today_matches')],
+                   [InlineKeyboardButton("🔙 Главное меню", callback_data='back_to_main')]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        # Удаляем старое сообщение
+        await query.message.delete()
+        # Отправляем новое сообщение частями
+        await send_long_message(query.message, text, reply_markup=reply_markup)
+    
+    elif query.data == 'admin_manage_roles':
+        await admin_manage_roles(query)
+    
+    elif query.data == 'admin_assign_role':
+        await admin_assign_role(query, context)
+    
+    elif query.data == 'admin_remove_role':
+        await admin_remove_role(query, context)
+    
+    elif query.data == 'admin_list_roles':
+        await admin_list_roles(query)
+    
+    elif query.data == 'admin_modify_balance':
+        user_id = str(query.from_user.id)
+        # Проверяем, имеет ли пользователь доступ к этой функции
+        if user_id != ADMIN_ID and (user_id not in user_roles or user_roles[user_id] not in ['developer', 'admin']):
+            await query.answer("❌ У вас нет доступа к этой функции!")
+            return
+        
+        # Сохраняем состояние в контексте
+        context.user_data['admin_state'] = 'waiting_user_id'
+        
+        await query.edit_message_text(
+            "💰 Изменение баланса пользователя\n\n"
+            "Введите ID пользователя:",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("🔙 Отмена", callback_data='admin_panel')
+            ]])
+        )
+    
+    elif query.data == 'send_money':
+        await send_money(query, context)
+        return
+    
+    elif query.data == 'upcoming_matches':
+        await show_upcoming_matches_with_odds(query)
+    
+    elif query.data.startswith('match_stats_'):
+        await show_match_predictions_stats(query)
+    
+    else:
+        await query.answer()
+        # Обработка остальных callback_data
+        if query.data == 'help':
+            text = "ℹ️ Помощь по использованию бота:\n\n"
+            for command, description in COMMANDS.items():
+                text += f"/{command} - {description}\n"
+            
+            text += "\n🏆 Новая система наград:\n"
+            text += f"• Точный счёт: {PREDICTION_REWARD_EXACT} монет\n"
+            text += f"• Правильная разница голов: {PREDICTION_REWARD_DIFF} монет\n"
+            text += f"• Правильный исход: {PREDICTION_REWARD_OUTCOME} монет\n\n"
+            text += "🌟 Топовые матчи дают повышенные награды!\n"
+            
+            keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data='back_to_main')]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text(text, reply_markup=reply_markup)
+        
+        elif query.data == 'settings':
+            await show_settings(query.message)
+
+# Команды для работы с матчами
+async def matches_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик команды /matches"""
+    matches = await fetch_matches()
+    if matches:
+        text = "📅 Матчи:\n\n"
+        
+        # Сначала показываем live матчи
+        live_matches = [m for m in matches if m['status'] in ['LIVE', 'IN_PLAY', 'PAUSED']]
+        if live_matches:
+            text += "🔴 LIVE МАТЧИ:\n\n"
+            for match in live_matches:
+                home_star = "⭐️ " if match['home'] in FAVORITE_TEAMS else ""
+                away_star = " ⭐️" if match['away'] in FAVORITE_TEAMS else ""
+                text += f"{get_match_status_emoji(match['status'])} {home_star}{match['home']} {match['score']} {away_star}{match['away']}\n"
+                text += f"🏆 {match['competition']}\n\n"
+        
+        # Показываем завершенные матчи
+        finished_matches = [m for m in matches if m['status'] == 'FINISHED']
+        if finished_matches:
+            text += "✅ ЗАВЕРШЕННЫЕ МАТЧИ:\n\n"
+            for match in finished_matches:
+                home_star = "⭐️ " if match['home'] in FAVORITE_TEAMS else ""
+                away_star = " ⭐️" if match['away'] in FAVORITE_TEAMS else ""
+                text += f"{get_match_status_emoji(match['status'])} {home_star}{match['home']} {match['score']} {away_star}{match['away']}\n"
+                text += f"🏆 {match['competition']}\n\n"
+        
+        # Затем показываем предстоящие матчи
+        scheduled_matches = [m for m in matches if m['status'] not in ['LIVE', 'IN_PLAY', 'PAUSED', 'FINISHED']]
+        if scheduled_matches:
+            text += "📆 ПРЕДСТОЯЩИЕ МАТЧИ:\n\n"
+            
+            # Группируем матчи по датам
+            matches_by_date = {}
+            for match in scheduled_matches:
+                match_date = datetime.strptime(match['date'], "%d.%m.%Y").date()
+                if match_date not in matches_by_date:
+                    matches_by_date[match_date] = []
+                matches_by_date[match_date].append(match)
+            
+            # Сортируем даты
+            sorted_dates = sorted(matches_by_date.keys())
+            
+            # Выводим матчи по датам
+            for date in sorted_dates:
+                text += f"\n📆 {date.strftime('%d.%m.%Y')}:\n"
+                for match in matches_by_date[date]:
+                    home_star = "⭐️ " if match['home'] in FAVORITE_TEAMS else ""
+                    away_star = " ⭐️" if match['away'] in FAVORITE_TEAMS else ""
+                    text += f"{get_match_status_emoji(match['status'])} {home_star}{match['home']} vs {away_star}{match['away']}\n"
+                    text += f"🕒 {match['time']} (UZB)\n"
+                    text += f"🏆 {match['competition']}\n\n"
+    else:
+        text = "Матчей с участием избранных команд не найдено"
+    
+    keyboard = [[InlineKeyboardButton("🔄 Обновить", callback_data='today_matches')],
+               [InlineKeyboardButton("🔙 Главное меню", callback_data='back_to_main')]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    # Отправляем сообщение частями
+    await send_long_message(update.message, text, reply_markup=reply_markup)
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик команды /help"""
+    text = "ℹ️ Помощь по использованию бота:\n\n"
+    for command, description in COMMANDS.items():
+        text += f"/{command} - {description}\n"
+    
+    text += "\n🏆 Новая система наград:\n"
+    text += f"• Точный счёт: {PREDICTION_REWARD_EXACT} монет\n"
+    text += f"• Правильная разница голов: {PREDICTION_REWARD_DIFF} монет\n"
+    text += f"• Правильный исход: {PREDICTION_REWARD_OUTCOME} монет\n\n"
+    text += "🌟 Топовые матчи дают повышенные награды!\n"
+    
+    keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data='back_to_main')]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text(text, reply_markup=reply_markup)
+
+# Вспомогательные функции
+async def show_matches(message):
+    """Показать матчи"""
+    matches = await fetch_matches()
+    if matches:
+        text = "📅 Матчи:\n\n"
+        
+        # Сначала показываем live матчи
+        live_matches = [m for m in matches if m['status'] in ['LIVE', 'IN_PLAY', 'PAUSED']]
+        if live_matches:
+            text += "🔴 LIVE МАТЧИ:\n\n"
+            for match in live_matches:
+                home_star = "⭐️ " if match['home'] in FAVORITE_TEAMS else ""
+                away_star = " ⭐️" if match['away'] in FAVORITE_TEAMS else ""
+                text += f"{get_match_status_emoji(match['status'])} {home_star}{match['home']} {match['score']} {away_star}{match['away']}\n"
+                text += f"🏆 {match['competition']}\n\n"
+        
+        # Показываем завершенные матчи
+        text += "📆 ПРЕДСТОЯЩИЕ МАТЧИ:\n\n"
+        today = datetime.now(pytz.timezone('Asia/Tashkent')).date()
+        
+        matches_by_date = {}
+        for match in matches:
+            if match['status'] not in ['LIVE', 'IN_PLAY', 'PAUSED']:
+                match_date = datetime.strptime(match['date'], "%d.%m.%Y").date()
+                if match_date not in matches_by_date:
+                    matches_by_date[match_date] = []
+                matches_by_date[match_date].append(match)
+        
+        sorted_dates = sorted(matches_by_date.keys())
+        
+        for date in sorted_dates:
+            if date >= today:
+                text += f"\n📆 {date.strftime('%d.%m.%Y')}:\n"
+                for match in matches_by_date[date]:
+                    home_star = "⭐️ " if match['home'] in FAVORITE_TEAMS else ""
+                    away_star = " ⭐️" if match['away'] in FAVORITE_TEAMS else ""
+                    text += f"{get_match_status_emoji(match['status'])} {home_star}{match['home']} vs {away_star}{match['away']}\n"
+                    if match['status'] == 'FINISHED':
+                        text += f"📊 Финальный счет: {match['score']}\n"
+                    else:
+                        text += f"🕒 {match['time']} (UZB)\n"
+                    text += f"🏆 {match['competition']}\n\n"
+    else:
+        text = "Матчей с участием избранных команд не найдено"
+    
+    keyboard = [[InlineKeyboardButton("🔄 Обновить", callback_data='today_matches')],
+                [InlineKeyboardButton("🔙 Главное меню", callback_data='back_to_main')]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await send_long_message(message, text, reply_markup=reply_markup)
+
+async def show_settings(message):
+    """Показать настройки пользователя"""
+    config = load_config()
+    user_id = str(message.from_user.id if isinstance(message, Update) else message.chat.id)
+    
+    # Получаем текущие подписки пользователя
+    user_settings = config.get('user_settings', {}).get(user_id, {
+        'subscribed_teams': [],
+        'goal_alerts': True,
+        'match_reminders': True
+    })
+    
+    text = "⚙️ Настройки уведомлений\n\n"
+    text += "🔔 Типы уведомлений:\n"
+    text += f"{'✅' if user_settings.get('goal_alerts', True) else '❌'} Уведомления о голах\n"
+    text += f"{'✅' if user_settings.get('match_reminders', True) else '❌'} Напоминания о матчах\n\n"
+    text += "📋 Выбранные команды:\n"
+    
+    # Показываем выбранные команды в тексте
+    selected_teams = user_settings.get('subscribed_teams', [])
+    if selected_teams:
+        for team_id in selected_teams:
+            text += f"✅ {AVAILABLE_TEAMS[team_id]}\n"
+    else:
+        text += "❌ Нет выбранных команд\n"
+    
+    text += "\nВыберите команды для отслеживания:"
+    
+    # Создаем клавиатуру
+    keyboard = []
+    
+    # Добавляем переключатели для типов уведомлений
+    keyboard.append([
+        InlineKeyboardButton(
+            f"{'🔔 Вкл.' if user_settings.get('goal_alerts', True) else '🔕 Выкл.'} Голы",
+            callback_data='toggle_goals'
+        )
+    ])
+    keyboard.append([
+        InlineKeyboardButton(
+            f"{'🔔 Вкл.' if user_settings.get('match_reminders', True) else '🔕 Выкл.'} Матчи",
+            callback_data='toggle_matches'
+        )
+    ])
+    
+    # Добавляем разделитель
+    keyboard.append([InlineKeyboardButton("〰️〰️〰️〰️〰️", callback_data='divider')])
+    
+    # Группируем команды по 2 в строке
+    teams_buttons = []
+    current_row = []
+    
+    for team_id, team_name in AVAILABLE_TEAMS.items():
+        status = "✅" if team_id in selected_teams else "➕"
+        current_row.append(
+            InlineKeyboardButton(
+                f"{status} {team_name}",
+                callback_data=f'subscribe_{team_id}'
+            )
+        )
+        
+        if len(current_row) == 2:
+            teams_buttons.append(current_row)
+            current_row = []
+    
+    # Добавляем оставшиеся кнопки
+    if current_row:
+        teams_buttons.append(current_row)
+    
+    # Добавляем кнопки команд
+    keyboard.extend(teams_buttons)
+    
+    # Добавляем кнопки управления
+    keyboard.append([
+        InlineKeyboardButton("✅ Выбрать все", callback_data='select_all'),
+        InlineKeyboardButton("❌ Очистить", callback_data='clear_all')
+    ])
+    
+    keyboard.append([InlineKeyboardButton("🔙 Главное меню", callback_data='back_to_main')])
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    try:
+        # Всегда пытаемся отредактировать сообщение
+        if isinstance(message, Update):
+            await message.message.edit_text(text, reply_markup=reply_markup)
+        else:
+            await message.edit_text(text, reply_markup=reply_markup)
+    except Exception as e:
+        logger.error(f"Ошибка при обновлении настроек: {str(e)}")
+        # Только если редактирование не удалось, отправляем новое сообщение
+        if isinstance(message, Update):
+            await message.message.reply_text(text, reply_markup=reply_markup)
+        else:
+            await message.reply_text(text, reply_markup=reply_markup)
+
+async def check_and_send_goal_alerts(matches, context):
+    """Проверка новых голов и отправка уведомлений"""
+    global previous_scores
+    config = load_config()
+    
+    for match in matches:
+        if match['status'] in ['LIVE', 'IN_PLAY', 'PAUSED']:
+            match_id = f"{match['home']}_{match['away']}_{match['date']}"
+            current_score = match['score']
+            
+            # Инициализируем счет, если это первое обновление
+            if match_id not in previous_scores:
+                previous_scores[match_id] = current_score
+                logger.info(f"Инициализация счета для матча {match_id}: {current_score}")
+                continue
+            
+            old_score = previous_scores[match_id]
+            if current_score != old_score:
+                try:
+                    # Разбираем счета на числа
+                    old_home, old_away = map(int, old_score.split(' : '))
+                    new_home, new_away = map(int, current_score.split(' : '))
+                    
+                    # Определяем, кто забил
+                    if new_home > old_home:
+                        scoring_team = match['home']
+                        opponent_team = match['away']
+                        new_score = new_home
+                        team_score = "домашняя команда"
+                    else:
+                        scoring_team = match['away']
+                        opponent_team = match['home']
+                        new_score = new_away
+                        team_score = "гостевая команда"
+                    
+                    # Формируем текст уведомления
+                    alert_text = f"⚽️ ГОЛ! Забивает {team_score}!\n\n"
+                    alert_text += f"✨ {scoring_team} забивает в ворота {opponent_team}!\n"
+                    alert_text += f"📊 Текущий счёт: {match['home']} {current_score} {match['away']}\n"
+                    alert_text += f"🏆 {match['competition']}"
+                    
+                    logger.info(f"Обнаружен новый гол: {scoring_team} забивает, счёт {current_score}")
+                    
+                    # Отправляем уведомление только подписанным пользователям
+                    for user_id, settings in config.get('user_settings', {}).items():
+                        subscribed_teams = settings.get('subscribed_teams', [])
+                        if settings.get('goal_alerts', True):
+                            # Проверяем, подписан ли пользователь на одну из команд
+                            if any(team in subscribed_teams for team in [match['home'], match['away']]):
+                                try:
+                                    await context.bot.send_message(chat_id=user_id, text=alert_text)
+                                    logger.info(f"Отправлено уведомление о голе пользователю {user_id}")
+                                except Exception as e:
+                                    logger.error(f"Ошибка отправки уведомления пользователю {user_id}: {str(e)}")
+                
+                except ValueError as e:
+                    logger.error(f"Ошибка при обработке счета матча: {str(e)}")
+                except Exception as e:
+                    logger.error(f"Непредвиденная ошибка при обработке гола: {str(e)}")
+            
+            # Обновляем предыдущий счет
+            previous_scores[match_id] = current_score
+
+async def check_and_send_match_reminders(context: ContextTypes.DEFAULT_TYPE):
+    """Отправка уведомлений о предстоящих матчах за 5 минут до начала и о начале матча"""
+    config = load_config()
+    matches = await fetch_matches()
+    uz_timezone = pytz.timezone('Asia/Tashkent')
+    now = datetime.now(uz_timezone)
+    
+    for match in matches:
+        if match['status'] == 'SCHEDULED':
+            # Преобразуем время матча в объект datetime с учетом часового пояса
+            match_datetime = datetime.strptime(f"{match['date']} {match['time']}", "%d.%m.%Y %H:%M")
+            match_datetime = uz_timezone.localize(match_datetime)
+            
+            # Вычисляем разницу во времени
+            time_until_match = match_datetime - now
+            minutes_until_match = time_until_match.total_seconds() / 60
+            
+            # Проверяем, что матч начинается через 5 минут (с погрешностью в 30 секунд)
+            if 4.5 <= minutes_until_match <= 5.5:
+                reminder_text = f"⚽️ Матч начнется через 5 минут!\n\n"
+                reminder_text += f"{match['home']} vs {match['away']}\n"
+                reminder_text += f"🕒 Начало в {match['time']} (UZB)\n"
+                reminder_text += f"🏆 {match['competition']}"
+                
+                # Отправляем уведомление только подписанным пользователям
+                for user_id, settings in config.get('user_settings', {}).items():
+                    if (settings.get('match_reminders', True) and 
+                        (match['home'] in settings.get('subscribed_teams', []) or 
+                         match['away'] in settings.get('subscribed_teams', []))):
+                        try:
+                            await context.bot.send_message(chat_id=user_id, text=reminder_text)
+                            logger.info(f"Отправлено напоминание о матче {match['home']} vs {match['away']} пользователю {user_id}")
+                            logger.info(f"Время до матча: {minutes_until_match} минут")
+                        except Exception as e:
+                            logger.error(f"Ошибка отправки напоминания пользователю {user_id}: {str(e)}")
+            
+            # Проверяем, что матч начинается прямо сейчас (с погрешностью в 30 секунд)
+            elif -0.5 <= minutes_until_match <= 0.5:
+                start_text = f"🎮 Матч начинается!\n\n"
+                start_text += f"{match['home']} vs {match['away']}\n"
+                start_text += f"🏆 {match['competition']}"
+                
+                # Отправляем уведомление только подписанным пользователям
+                for user_id, settings in config.get('user_settings', {}).items():
+                    if (settings.get('match_reminders', True) and 
+                        (match['home'] in settings.get('subscribed_teams', []) or 
+                         match['away'] in settings.get('subscribed_teams', []))):
+                        try:
+                            await context.bot.send_message(chat_id=user_id, text=start_text)
+                            logger.info(f"Отправлено уведомление о начале матча {match['home']} vs {match['away']} пользователю {user_id}")
+                        except Exception as e:
+                            logger.error(f"Ошибка отправки уведомления пользователю {user_id}: {str(e)}")
+
+async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик команды /settings"""
+    await show_settings(update.message)
+
+async def get_user_balance(user_id: str) -> int:
+    """Получить баланс пользователя"""
+    return user_currency.get(str(user_id), 1000)  # Начальный баланс 1000
+
+async def update_user_balance(user_id: str, amount: int):
+    """Обновить баланс пользователя"""
+    user_id = str(user_id)
+    if user_id not in user_currency:
+        user_currency[user_id] = 1000
+    user_currency[user_id] += amount
+    save_user_data(user_currency, user_predictions, user_names, user_items, user_statuses, user_nicknames, user_roles)  # Сохраняем после каждого обновления
+
+async def predict_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик команды /predict"""
+    user_id = str(update.effective_user.id)
+    
+    # Проверяем баланс пользователя
+    balance = await get_user_balance(user_id)
+    if balance < PREDICTION_COST:
+        await update.message.reply_text(
+            f"❌ У вас недостаточно монет для прогноза!\n"
+            f"Стоимость прогноза: {PREDICTION_COST} монет\n"
+            f"Ваш баланс: {balance} монет"
+        )
+        return
+    
+    # Получаем текущие матчи
+    matches = await fetch_matches()
+    
+    # Фильтруем матчи, на которые можно сделать прогноз
+    has_vip = has_active_item(user_id, 'vip_predict')
+    
+    if has_vip:
+        # Для VIP пользователей - все текущие матчи
+        available_matches = [m for m in matches if m['status'] in ['SCHEDULED', 'LIVE', 'IN_PLAY', 'PAUSED']]
+    else:
+        # Для обычных пользователей - только предстоящие матчи (не LIVE, не IN_PLAY, не PAUSED, не FINISHED)
+        available_matches = [m for m in matches if m['status'] not in ['LIVE', 'IN_PLAY', 'PAUSED', 'FINISHED']]
+    
+    if not available_matches:
+        await update.message.reply_text("❌ Сейчас нет доступных матчей для прогноза!")
+import os
+import logging
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
+import asyncio
+import json
+from datetime import datetime, timedelta
+import pytz
+import aiohttp
+import signal
+import sys
+import nest_asyncio
+import atexit
+from shop_functions import shop_command as shop_cmd, show_shop_category as show_shop, process_purchase as process_purchase_shop, has_active_item as has_active_item_shop, use_item as use_item_shop, save_shop_items, load_shop_items
+import re
+import time
+
+# Применяем патч для вложенных циклов событий
+nest_asyncio.apply()
+
+# Проверка на уже запущенный экземпляр
+LOCK_FILE = "bot.lock"
+
+def check_running():
+    if os.path.exists(LOCK_FILE):
+        try:
+            with open(LOCK_FILE, 'r') as f:
+                pid = int(f.read().strip())
+            # Проверяем, существует ли процесс с таким PID
+            os.kill(pid, 0)
+            return True
+        except (OSError, ValueError):
+            # Если процесс не существует или файл поврежден
+            os.remove(LOCK_FILE)
+    return False
+
+def create_lock():
+    with open(LOCK_FILE, 'w') as f:
+        f.write(str(os.getpid()))
+
+def remove_lock():
+    if os.path.exists(LOCK_FILE):
+        os.remove(LOCK_FILE)
+
+# Регистрируем функцию удаления файла блокировки при выходе
+atexit.register(remove_lock)
+
+# Настройка логирования
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
+
+# Глобальные переменные
+application = None
+shutdown_event = None
+previous_scores = {}  # Для хранения предыдущих счетов матчей
+user_predictions = {}  # Для хранения предсказаний пользователей
+user_currency = {}  # Для хранения валюты пользователей
+user_names = {}  # Для хранения имен пользователей
+user_items = {}  # Для хранения купленных предметов
+matches_cache = {
+    'data': [],
+    'last_update': None,
+    'cache_duration': 30  # Кэш на 30 секунд
+}
+
+# Добавляем новые глобальные переменные
+user_statuses = {}  # Для хранения пользовательских статусов
+user_nicknames = {}  # Для хранения пользовательских никнеймов
+user_roles = {}  # Для хранения ролей пользователей
+
+# Роли пользователей и их префиксы
+USER_ROLES = {
+    'developer': {
+        'name': '👨‍💻 Developer',
+        'prefix': '[DEV] ',
+        'color': '🟣',
+        'description': 'Полный доступ ко всей админ-панели',
+        'purchasable': False
+    },
+    'admin': {
+        'name': '🔐 Admin',
+        'prefix': '[ADMIN] ',
+        'color': '🔴',
+        'description': 'Доступ к админ-панели с ограничениями',
+        'price': 5000,
+        'duration': 30,  # Дней
+        'purchasable': True
+    },
+    'moderator': {
+        'name': '🛡️ Moderator',
+        'prefix': '[MOD] ',
+        'color': '🟠',
+        'description': 'Доступ к отправке сообщений всем пользователям',
+        'price': 3000,
+        'duration': 30,  # Дней
+        'purchasable': True
+    },
+    'operator': {
+        'name': '🔧 Operator',
+        'prefix': '[OP] ',
+        'color': '🟡',
+        'description': 'Доступ к отправке сообщений и статистике бота',
+        'price': 2000,
+        'duration': 30,  # Дней
+        'purchasable': True
+    },
+    'user': {
+        'name': '👤 User',
+        'prefix': '',
+        'color': '⚪',
+        'description': 'Обычный пользователь',
+        'purchasable': False
+    }
+}
+
+# Товары в магазине
+SHOP_ITEMS = {
+    'double_reward': {
+        'name': '🎯 Двойная награда',
+        'description': 'Следующее правильное предсказание принесет двойную награду',
+        'price': 500,
+        'duration': 1,  # Количество использований
+        'category': 'boosters'
+    },
+    'insurance': {
+        'name': '🛡️ Страховка',
+        'description': 'Возврат ставки при неправильном предсказании',
+        'price': 300,
+        'duration': 1,
+        'category': 'boosters'
+    },
+    'vip_predict': {
+        'name': '⭐️ VIP-прогноз',
+        'description': 'Возможность сделать прогноз на уже начавшийся матч',
+        'price': 1000,
+        'duration': 1,
+        'category': 'boosters'
+    },
+    'custom_nickname': {
+        'name': '📝 Смена никнейма',
+        'description': 'Установить свой никнейм в боте',
+        'price': 200,
+        'duration': 1,
+        'category': 'game'
+    },
+    'custom_status': {
+        'name': '💫 Кастомный статус',
+        'description': 'Установить свой статус в профиле',
+        'price': 300,
+        'duration': 30,  # Дней
+        'category': 'game'
+    },
+    'vip_status': {
+        'name': '👑 VIP-статус',
+        'description': 'Особая отметка в топе и расширенная статистика',
+        'price': 2000,
+        'duration': 7,  # Дней
+        'category': 'game'
+    },
+    'extended_stats': {
+        'name': '📊 Расширенная статистика',
+        'description': 'Доступ к подробной статистике матчей',
+        'price': 500,
+        'duration': 30,  # Дней
+        'category': 'football'
+    },
+    'priority_notifications': {
+        'name': '🔔 Приоритетные уведомления',
+        'description': 'Получать уведомления первым',
+        'price': 400,
+        'duration': 30,  # Дней
+        'category': 'football'
+    },
+    'tournament_tables': {
+        'name': '🏆 Турнирные таблицы',
+        'description': 'Доступ к эксклюзивным турнирным таблицам',
+        'price': 600,
+        'duration': 30,  # Дней
+        'category': 'football'
+    },
+    'role_admin': {
+        'name': USER_ROLES['admin']['name'],
+        'description': USER_ROLES['admin']['description'],
+        'price': USER_ROLES['admin']['price'],
+        'duration': USER_ROLES['admin']['duration'],
+        'category': 'roles',
+        'role': 'admin'
+    },
+    'role_moderator': {
+        'name': USER_ROLES['moderator']['name'],
+        'description': USER_ROLES['moderator']['description'],
+        'price': USER_ROLES['moderator']['price'],
+        'duration': USER_ROLES['moderator']['duration'],
+        'category': 'roles',
+        'role': 'moderator'
+    },
+    'role_operator': {
+        'name': USER_ROLES['operator']['name'],
+        'description': USER_ROLES['operator']['description'],
+        'price': USER_ROLES['operator']['price'],
+        'duration': USER_ROLES['operator']['duration'],
+        'category': 'roles',
+        'role': 'operator'
+    }
+}
+
+# ID администратора (замените на свой ID)
+ADMIN_ID = "791190609"  # Замените на ваш ID в Telegram
+
+# Константы для системы предсказаний
+PREDICTION_COST = 10    # Стоимость одного предсказания
+PREDICTION_REWARD_EXACT = 50  # Награда за точный счет (x5)
+PREDICTION_REWARD_DIFF = 30   # Награда за правильную разницу голов (x3)
+PREDICTION_REWARD_OUTCOME = 20  # Награда за правильный исход (x2)
+
+# Коэффициенты для топ-матчей
+TOP_TEAMS = ["Real Madrid", "Barcelona", "Manchester City", "Liverpool", "Bayern Munich", "PSG"]
+TOP_MATCH_MULTIPLIER = 1.5  # Коэффициент для матчей между топ-командами
+
+# Команды бота
+COMMANDS = {
+    'start': 'Запустить бота',
+    'matches': 'Показать сегодняшние матчи',
+    'settings': 'Настройки уведомлений',
+    'help': 'Показать помощь',
+    'predict': 'Сделать предсказание счета матча',
+    'balance': 'Проверить баланс',
+    'top': 'Показать топ предсказателей',
+    'shop': 'Открыть магазин',
+    'prognoz': 'Показать прогнозы на предстоящие матчи',
+    'admin': 'Панель администратора (только для админа)'
+}
+
+# Все доступные команды для подписки
+AVAILABLE_TEAMS = {
+    "Real Madrid": "Реал Мадрид",
+    "Barcelona": "Барселона",
+    "Manchester City": "Манчестер Сити",
+    "Manchester United": "Манчестер Юнайтед",
+    "Liverpool": "Ливерпуль",
+    "Chelsea": "Челси",
+    "Arsenal": "Арсенал",
+    "Bayern Munich": "Бавария",
+    "Borussia Dortmund": "Боруссия Д",
+    "PSG": "ПСЖ"
+}
+
+# Избранные команды
+FAVORITE_TEAMS = [
+    "Real Madrid",
+    "Barcelona",
+    "Manchester City"
+]
+
+# Файлы для хранения данных
+USER_DATA_FILE = os.path.join(os.environ.get('RAILWAY_VOLUME_MOUNT_PATH', ''), "user_data.json")
+PREDICTIONS_FILE = os.path.join(os.environ.get('RAILWAY_VOLUME_MOUNT_PATH', ''), "predictions.json")
+
+def load_user_data():
+    """Загрузка данных пользователей из файла"""
+    try:
+        with open(USER_DATA_FILE, 'r') as f:
+            data = json.load(f)
+            return (
+                data.get('user_currency', {}),
+                data.get('user_predictions', {}),
+                data.get('user_names', {}),
+                data.get('user_items', {}),
+                data.get('user_statuses', {}),
+                data.get('user_nicknames', {}),
+                data.get('user_roles', {})
+            )
+    except FileNotFoundError:
+        logger.info(f"Файл данных пользователей не найден по пути: {USER_DATA_FILE}. Создаем новый.")
+        return {}, {}, {}, {}, {}, {}, {}
+    except Exception as e:
+        logger.error(f"Ошибка при загрузке данных пользователей: {str(e)}")
+        return {}, {}, {}, {}, {}, {}, {}
+
+def save_user_data(currency_data, predictions_data, names_data, items_data, statuses_data, nicknames_data, roles_data):
+    """Сохранение данных пользователей в файл"""
+    data = {
+        'user_currency': currency_data,
+        'user_predictions': predictions_data,
+        'user_names': names_data,
+        'user_items': items_data,
+        'user_statuses': statuses_data,
+        'user_nicknames': nicknames_data,
+        'user_roles': roles_data
+    }
+    try:
+        # Создаем директорию, если она не существует
+        os.makedirs(os.path.dirname(USER_DATA_FILE) or '.', exist_ok=True)
+        
+        with open(USER_DATA_FILE, 'w') as f:
+            json.dump(data, f, indent=4)
+        logger.info(f"Данные пользователей успешно сохранены в {USER_DATA_FILE}")
+    except Exception as e:
+        logger.error(f"Ошибка при сохранении данных пользователей: {str(e)}")
+
+# Загружаем данные при запуске
+user_currency, user_predictions, user_names, user_items, user_statuses, user_nicknames, user_roles = load_user_data()
+
+# Функция для автоматического сохранения данных
+def save_data_periodically():
+    """Периодическое сохранение данных"""
+    save_user_data(user_currency, user_predictions, user_names, user_items, user_statuses, user_nicknames, user_roles)
+
+# Загрузка конфигурации
+def load_config():
+    try:
+        with open('config.json', 'r') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {
+            "authorized_users": [],
+            "bot_token": "7736382046:AAFmMBfomQ9Xh15gglYuv6eA4Xd1oY2JGuU",
+            "football_api_token": "f4d562844acb4bddb32de86d798d35b5",  # Токен для football-data.org
+            "user_teams": {},
+            "last_update": None,
+            "cache_duration": 300,  # Кэширование на 5 минут
+            "user_settings": {}
+        }
+
+# Сохранение конфигурации
+def save_config(config):
+    with open('config.json', 'w') as f:
+        json.dump(config, f, indent=4)
+
+# Проверка авторизации пользователя
+def is_authorized(user_id, config):
+    return str(user_id) in config["authorized_users"]
+
+def get_user_display_name(user_id, user=None):
+    """Получить отображаемое имя пользователя с префиксом роли"""
+    user_id = str(user_id)
+    
+    # Получаем базовое имя
+    base_name = ""
+    if user_id in user_nicknames:
+        base_name = user_nicknames[user_id]
+    elif user_id in user_names:
+        base_name = user_names[user_id]
+    elif user:
+        if user.username:
+            base_name = f"@{user.username}"
+        elif user.first_name and user.last_name:
+            base_name = f"{user.first_name} {user.last_name}"
+        elif user.first_name:
+            base_name = user.first_name
+        else:
+            base_name = f"User{user_id}"
+        user_names[user_id] = base_name
+        save_user_data(user_currency, user_predictions, user_names, user_items, user_statuses, user_nicknames, user_roles)
+    else:
+        base_name = f"User{user_id}"
+    
+    # Добавляем префикс роли, если есть
+    if user_id in user_roles and user_roles[user_id] in USER_ROLES:
+        role = user_roles[user_id]
+        prefix = USER_ROLES[role]['prefix']
+        return f"{prefix}{base_name}"
+    
+    return base_name
+
+# Команда /start
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик команды /start"""
+    user_id = str(update.effective_user.id)
+    username = update.effective_user.username or update.effective_user.first_name
+    
+    # Проверяем, есть ли пользователь в базе
+    if user_id not in user_currency:
+        user_currency[user_id] = 1000  # Начальный баланс
+        save_user_data(user_currency, user_predictions, user_names, user_items, user_statuses, user_nicknames, user_roles)
+        logger.info(f"Новый пользователь: {user_id} ({username})")
+    
+    # Создаем клавиатуру
+    keyboard = [
+        [InlineKeyboardButton("⚽️ Матчи", callback_data='today_matches'),
+         InlineKeyboardButton("🎯 Прогнозы", callback_data='show_predictions')],
+        [InlineKeyboardButton("📊 Прогнозы матчей", callback_data='upcoming_matches')],
+        [InlineKeyboardButton("💰 Баланс", callback_data='show_balance'),
+         InlineKeyboardButton("🏆 Топ игроков", callback_data='show_top')],
+        [InlineKeyboardButton("🏪 Магазин", callback_data='show_shop'),
+         InlineKeyboardButton("ℹ️ Помощь", callback_data='show_help')]
+    ]
+    
+    # Добавляем кнопку админ-панели для пользователей с соответствующими ролями
+    has_admin_access = False
+    
+    # Developer имеет полный доступ
+    if user_id == ADMIN_ID:
+        has_admin_access = True
+        user_roles[user_id] = 'developer'  # Устанавливаем роль developer для админа
+    # Проверяем роль пользователя
+    elif user_id in user_roles:
+        role = user_roles[user_id]
+        if role in ['developer', 'admin', 'moderator', 'operator']:
+            has_admin_access = True
+    
+    if has_admin_access:
+        keyboard.append([InlineKeyboardButton("🔐 Админ-панель", callback_data='admin_panel')])
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    # Формируем приветственное сообщение
+    welcome_message = (
+        f"👋 Привет, {get_user_display_name(user_id)}!\n\n"
+        "🤖 Я бот для прогнозов на футбольные матчи.\n\n"
+        "🏆 Новая система наград:\n"
+        f"• Точный счёт: {PREDICTION_REWARD_EXACT} монет\n"
+        f"• Правильная разница голов: {PREDICTION_REWARD_DIFF} монет\n"
+        f"• Правильный исход: {PREDICTION_REWARD_OUTCOME} монет\n\n"
+        "🌟 Топовые матчи дают повышенные награды!\n\n"
+        "💰 Используйте монеты для покупки предметов в магазине.\n"
+        "📊 Соревнуйтесь с другими игроками в таблице лидеров."
+    )
+    
+    await update.message.reply_text(welcome_message, reply_markup=reply_markup)
+
+def normalize_team_name(name):
+    """Нормализация названий команд"""
+    name_mapping = {
+        "Real Madrid CF": "Real Madrid",
+        "FC Barcelona": "Barcelona",
+        "Manchester City FC": "Manchester City",
+        "Manchester United FC": "Manchester United",
+        "Liverpool FC": "Liverpool",
+        "Chelsea FC": "Chelsea",
+        "Arsenal FC": "Arsenal",
+        "FC Bayern München": "Bayern Munich",
+        "Borussia Dortmund": "Borussia Dortmund",
+        "Paris Saint-Germain FC": "PSG",
+        "Real Madrid": "Real Madrid",
+        "Barcelona": "Barcelona",
+        "Manchester City": "Manchester City",
+        "Manchester United": "Manchester United",
+        "Liverpool": "Liverpool",
+        "Chelsea": "Chelsea",
+        "Arsenal": "Arsenal",
+        "Bayern Munich": "Bayern Munich",
+        "PSG": "PSG"
+    }
+    return name_mapping.get(name, name)
+
+def get_match_status_emoji(status):
+    """Получение эмодзи для статуса матча"""
+    status_mapping = {
+        'SCHEDULED': '🕒',  # Запланирован
+        'LIVE': '🔴',      # Идет сейчас
+        'IN_PLAY': '🔴',   # Идет сейчас
+        'PAUSED': '⏸️',    # Перерыв
+        'FINISHED': '✅',   # Завершен
+        'POSTPONED': '⏳',  # Отложен
+        'CANCELLED': '❌',  # Отменен
+        'SUSPENDED': '⚠️',  # Приостановлен
+    }
+    return status_mapping.get(status, '❓')
+
+# Получение списка матчей
+async def fetch_matches():
+    """Получение списка матчей с кэшированием"""
+    try:
+        current_time = datetime.now()
+        
+        # Проверяем кэш
+        if (matches_cache['last_update'] and 
+            (current_time - matches_cache['last_update']).total_seconds() < matches_cache['cache_duration'] and 
+            matches_cache['data']):
+            logger.info("Используем кэшированные данные матчей")
+            return matches_cache['data']
+        
+        async with aiohttp.ClientSession() as session:
+            headers = {
+                'X-Auth-Token': load_config().get('football_api_token', '')
+            }
+            
+            # Получаем матчи на неделю вперед
+            london_tz = pytz.timezone('Europe/London')
+            today = datetime.now(london_tz).strftime("%Y-%m-%d")
+            next_week = (datetime.now(london_tz) + timedelta(days=7)).strftime("%Y-%m-%d")
+            url = f"http://api.football-data.org/v4/matches?dateFrom={today}&dateTo={next_week}"
+            
+            logger.info(f"Запрос матчей с {today} по {next_week}")
+            
+            async with session.get(url, headers=headers) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    matches = data.get('matches', [])
+                    logger.info(f"Получено {len(matches)} матчей из API")
+                    
+                    # Логируем все матчи для отладки
+                    for match in matches:
+                        home_team = match['homeTeam'].get('name', '')
+                        away_team = match['awayTeam'].get('name', '')
+                        match_date = match['utcDate']
+                        logger.info(f"API вернул матч: {home_team} vs {away_team} ({match_date})")
+                    
+                    formatted_matches = []
+                    uz_timezone = pytz.timezone('Asia/Tashkent')
+                    
+                    for match in matches:
+                        try:
+                            home_team = normalize_team_name(match['homeTeam'].get('name', ''))
+                            away_team = normalize_team_name(match['awayTeam'].get('name', ''))
+                            
+                            # Логируем нормализованные названия команд
+                            logger.info(f"Нормализованные названия: {home_team} vs {away_team}")
+                            
+                            # Фильтруем только матчи избранных команд
+                            if home_team in FAVORITE_TEAMS or away_team in FAVORITE_TEAMS:
+                                utc_time = datetime.strptime(match['utcDate'], "%Y-%m-%dT%H:%M:%SZ")
+                                utc_time = utc_time.replace(tzinfo=pytz.UTC)
+                                uz_time = utc_time.astimezone(uz_timezone)
+                                
+                                score = match.get('score', {})
+                                current_score = "- : -"
+                                
+                                if match['status'] == 'FINISHED':
+                                    if score.get('fullTime', {}).get('home') is not None:
+                                        home_score = score['fullTime']['home']
+                                        away_score = score['fullTime']['away']
+                                        current_score = f"{home_score} : {away_score}"
+                                
+                                elif match['status'] in ['LIVE', 'IN_PLAY', 'PAUSED']:
+                                    if score.get('fullTime', {}).get('home') is not None:
+                                        home_score = score['fullTime']['home']
+                                        away_score = score['fullTime']['away']
+                                        current_score = f"{home_score} : {away_score}"
+                                    elif score.get('halfTime', {}).get('home') is not None:
+                                        home_score = score['halfTime']['home']
+                                        away_score = score['halfTime']['away']
+                                        current_score = f"{home_score} : {away_score}"
+                                
+                                formatted_match = {
+                                    "home": home_team,
+                                    "away": away_team,
+                                    "time": uz_time.strftime("%H:%M"),
+                                    "date": uz_time.strftime("%d.%m.%Y"),
+                                    "status": match['status'],
+                                    "score": current_score,
+                                    "competition": match['competition']['name']
+                                }
+                                
+                                formatted_matches.append(formatted_match)
+                                logger.info(f"Добавлен матч: {home_team} vs {away_team} ({uz_time.strftime('%d.%m.%Y %H:%M')})")
+                            else:
+                                logger.info(f"Матч не добавлен (не избранная команда): {home_team} vs {away_team}")
+                        
+                        except Exception as e:
+                            logger.error(f"Ошибка форматирования матча: {str(e)}")
+                            continue
+                    
+                    # Сортируем матчи
+                    formatted_matches.sort(key=lambda x: (
+                        0 if x['status'] in ['LIVE', 'IN_PLAY', 'PAUSED'] else
+                        1 if x['status'] == 'FINISHED' else 2,
+                        datetime.strptime(f"{x['date']} {x['time']}", "%d.%m.%Y %H:%M")
+                    ))
+                    
+                    # Обновляем кэш
+                    matches_cache['data'] = formatted_matches
+                    matches_cache['last_update'] = current_time
+                    
+                    return formatted_matches
+                else:
+                    logger.error(f"Ошибка API: {response.status}")
+                    logger.error(f"Ответ API: {await response.text()}")
+                    return matches_cache['data'] if matches_cache['data'] else []
+            
+    except Exception as e:
+        logger.error(f"Ошибка при получении матчей: {str(e)}")
+        return matches_cache['data'] if matches_cache['data'] else []
+
+def get_team_id(team_name):
+    """Получение ID команды для API football-data.org"""
+    team_ids = {
+        "Real Madrid": 86,
+        "Barcelona": 81,
+        "Manchester City": 65,
+        "Manchester United": 66,
+        "Liverpool": 64,
+        "Chelsea": 61,
+        "Arsenal": 57,
+        "Bayern Munich": 5,
+        "Borussia Dortmund": 4,
+        "PSG": 524
+    }
+    return team_ids.get(team_name)
+
+# Обработка нажатий на кнопки
+async def split_long_message(text, max_length=4000):
+    """Разделить длинное сообщение на части"""
+    parts = []
+    current_part = ""
+    
+    # Разделяем по блокам матчей (два переноса строки)
+    blocks = text.split('\n\n')
+    
+    for block in blocks:
+        # Если текущая часть + новый блок не превышает лимит
+        if len(current_part + block + '\n\n') <= max_length:
+            current_part += block + '\n\n'
+        else:
+            # Если текущая часть не пустая, добавляем её в список частей
+            if current_part:
+                parts.append(current_part.strip())
+            current_part = block + '\n\n'
+    
+    # Добавляем последнюю часть
+    if current_part:
+        parts.append(current_part.strip())
+    
+    return parts
+
+async def send_long_message(message, text, reply_markup=None):
+    """Отправить длинное сообщение частями"""
+    parts = await split_long_message(text)
+    
+    try:
+        # Проверяем, является ли чат группой
+        chat_type = message.chat.type if hasattr(message, 'chat') else message.message.chat.type
+        is_group = chat_type in ['group', 'supergroup']
+        
+        # Если это группа, проверяем права бота
+        if is_group:
+            try:
+                bot_member = await message.get_bot().get_chat_member(
+                    chat_id=message.chat.id if hasattr(message, 'chat') else message.message.chat.id,
+                    user_id=message.get_bot().id
+                )
+                can_send = bot_member.can_send_messages
+                can_edit = bot_member.can_edit_messages
+                
+                if not can_send:
+                    logger.error("У бота нет прав на отправку сообщений в группе")
+                    return
+            except Exception as e:
+                logger.error(f"Ошибка при проверке прав бота: {str(e)}")
+                return
+        
+        # Если это callback query (кнопки в сообщении)
+        if hasattr(message, 'edit_message_text'):
+            try:
+                # Отправляем все части, кроме последней
+                for part in parts[:-1]:
+                    await message.get_bot().send_message(
+                        chat_id=message.message.chat.id,
+                        text=part
+                    )
+                # Последнюю часть отправляем с кнопками
+                await message.edit_message_text(
+                    text=parts[-1],
+                    reply_markup=reply_markup
+                )
+            except Exception as e:
+                logger.error(f"Ошибка при обновлении сообщения: {str(e)}")
+                # Пробуем отправить новое сообщение
+                await message.get_bot().send_message(
+                    chat_id=message.message.chat.id,
+                    text=parts[-1],
+                    reply_markup=reply_markup
+                )
+        else:
+            # Обычное сообщение
+            try:
+                # Отправляем все части, кроме последней
+                for part in parts[:-1]:
+                    await message.get_bot().send_message(
+                        chat_id=message.chat.id,
+                        text=part
+                    )
+                # Последнюю часть отправляем с кнопками
+                await message.get_bot().send_message(
+                    chat_id=message.chat.id,
+                    text=parts[-1],
+                    reply_markup=reply_markup
+                )
+            except Exception as e:
+                logger.error(f"Ошибка при отправке сообщения: {str(e)}")
+    except Exception as e:
+        logger.error(f"Критическая ошибка при отправке сообщения: {str(e)}")
+        # Пробуем отправить сообщение об ошибке
+        try:
+            chat_id = message.chat.id if hasattr(message, 'chat') else message.message.chat.id
+            await message.get_bot().send_message(
+                chat_id=chat_id,
+                text="❌ Произошла ошибка при отправке сообщения. Пожалуйста, проверьте права бота в группе."
+            )
+        except:
+            pass
+
+async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка нажатий на кнопки"""
+    query = update.callback_query
+    await query.answer()
+    
+    # Обработка кнопок предсказаний
+    if query.data.startswith('predict_'):
+        await process_prediction(update, context)
+        return
+    
+    # Обработка кнопок статистики
+    elif query.data.startswith('stats_'):
+        await show_match_stats(update, context)
+        return
+    
+    # Обработка кнопок управления ролями
+    elif query.data.startswith('role_'):
+        role_name = query.data.split('_')[1]
+        
+        if 'awaiting_role_name' in context.user_data and 'target_user_id' in context.user_data:
+            target_user_id = context.user_data['target_user_id']
+            user_id = str(query.from_user.id)
+            
+            # Проверяем, имеет ли пользователь право назначать эту роль
+            if role_name == 'developer' and user_id != ADMIN_ID:
+                await query.answer("❌ Только главный администратор может назначать роль Developer!")
+                return
+            
+            # Проверяем, не пытается ли админ изменить роль developer
+            if target_user_id in user_roles and user_roles[target_user_id] == 'developer' and user_id != ADMIN_ID:
+                await query.answer("❌ Вы не можете изменить роль Developer!")
+                return
+            
+            # Назначаем роль пользователю
+            user_roles[target_user_id] = role_name
+            
+            # Добавляем срок действия роли (30 дней) для всех ролей кроме developer и user
+            if role_name not in ['developer', 'user']:
+                # Добавляем информацию о сроке действия роли (30 дней)
+                if 'role_expiry' not in user_items.get(target_user_id, {}):
+                    if target_user_id not in user_items:
+                        user_items[target_user_id] = {}
+                    user_items[target_user_id]['role_expiry'] = {}
+                
+                user_items[target_user_id]['role_expiry'][role_name] = int(time.time()) + (30 * 24 * 60 * 60)  # 30 дней
+            
+            # Если роль покупается в магазине, очищаем флаг
+            if 'shop_role_purchase' in context.user_data:
+                context.user_data.pop('shop_role_purchase', None)
+            
+            save_user_data(user_currency, user_predictions, user_names, user_items, user_statuses, user_nicknames, user_roles)
+            
+            # Получаем имя пользователя из доступных словарей
+            user_name = user_names.get(target_user_id) or user_nicknames.get(target_user_id) or f"User{target_user_id}"
+            
+            # Отправляем уведомление пользователю о назначении роли
+            try:
+                role_info = USER_ROLES.get(role_name, {'name': role_name})
+                await context.bot.send_message(
+                    chat_id=target_user_id,
+                    text=f"🎖️ Вам назначена роль: {role_info['name']}!\n"
+                         f"Теперь у вас есть доступ к дополнительным функциям бота."
+                )
+            except Exception as e:
+                logger.error(f"Ошибка отправки уведомления пользователю: {str(e)}")
+            
+            await query.edit_message_text(
+                f"✅ Роль {role_name} успешно назначена пользователю {user_name}!"
+            )
+            
+            # Возвращаемся в меню управления ролями
+            keyboard = [
+                [InlineKeyboardButton("👤 Назначить роль", callback_data="admin_assign_role")],
+                [InlineKeyboardButton("🗑️ Удалить роль", callback_data="admin_remove_role")],
+                [InlineKeyboardButton("📋 Список пользователей с ролями", callback_data="admin_list_roles")],
+                [InlineKeyboardButton("🔙 Назад в админ-панель", callback_data="admin_panel")]
+            ]
+            
+            await context.bot.send_message(
+                chat_id=query.from_user.id,
+                text="Управление ролями пользователей:",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            
+            # Очищаем состояние
+            context.user_data.pop('awaiting_role_name', None)
+            context.user_data.pop('target_user_id', None)
+        return
+    
+    # Обработка кнопок админ-панели
+    elif query.data == 'admin_panel':
+        await admin_panel(update, context)
+    
+    # Обработка кнопки управления ролями
+    elif query.data == 'admin_manage_roles':
+        await admin_manage_roles(query)
+    
+    # Обработка кнопки назначения роли
+    elif query.data == 'admin_assign_role':
+        await admin_assign_role(query, context)
+    
+    # Обработка кнопки удаления роли
+    elif query.data == 'admin_remove_role':
+        await admin_remove_role(query, context)
+    
+    # Обработка кнопки списка пользователей с ролями
+    elif query.data == 'admin_list_roles':
+        await admin_list_roles(query)
+    
+    # Остальные обработчики...
+    elif query.data == 'back_to_main':
+        user_id = str(query.from_user.id)
+        
+        # Создаем клавиатуру
+        keyboard = [
+            [InlineKeyboardButton("⚽️ Матчи", callback_data='today_matches'),
+             InlineKeyboardButton("🎯 Прогнозы", callback_data='show_predictions')],
+            [InlineKeyboardButton("📊 Прогнозы матчей", callback_data='upcoming_matches')],
+            [InlineKeyboardButton("💰 Баланс", callback_data='show_balance'),
+             InlineKeyboardButton("🏆 Топ игроков", callback_data='show_top')],
+            [InlineKeyboardButton("🏪 Магазин", callback_data='show_shop'),
+             InlineKeyboardButton("ℹ️ Помощь", callback_data='show_help')]
+        ]
+        
+        # Добавляем кнопку админ-панели для администратора
+        if user_id == ADMIN_ID:
+            keyboard.append([InlineKeyboardButton("🔐 Админ-панель", callback_data='admin_panel')])
+        # Добавляем кнопку админ-панели для пользователей с ролями
+        elif user_id in user_roles and user_roles[user_id] in ['admin', 'moderator', 'operator']:
+            # Проверяем, не истек ли срок действия роли
+            role_expired = False
+            if user_id in user_items and 'role_expiry' in user_items[user_id]:
+                role = user_roles[user_id]
+                if role in user_items[user_id]['role_expiry']:
+                    expiry_time = user_items[user_id]['role_expiry'][role]
+                    if int(time.time()) > expiry_time:
+                        # Роль истекла, удаляем её
+                        user_roles.pop(user_id, None)
+                        user_items[user_id]['role_expiry'].pop(role, None)
+                        role_expired = True
+                        save_user_data(user_currency, user_predictions, user_names, user_items, user_statuses, user_nicknames, user_roles)
+            
+            if not role_expired:
+                keyboard.append([InlineKeyboardButton("🔐 Админ-панель", callback_data='admin_panel')])
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        # Формируем приветственное сообщение
+        welcome_message = (
+            f"👋 Привет, {get_user_display_name(user_id)}!\n\n"
+            "🤖 Я бот для прогнозов на футбольные матчи.\n\n"
+            "🏆 Новая система наград:\n"
+            f"• Точный счёт: {PREDICTION_REWARD_EXACT} монет\n"
+            f"• Правильная разница голов: {PREDICTION_REWARD_DIFF} монет\n"
+            f"• Правильный исход: {PREDICTION_REWARD_OUTCOME} монет\n\n"
+            "🌟 Топовые матчи дают повышенные награды!\n\n"
+            "💰 Используйте монеты для покупки предметов в магазине.\n"
+            "📊 Соревнуйтесь с другими игроками в таблице лидеров."
+        )
+        
+        await query.edit_message_text(welcome_message, reply_markup=reply_markup)
+    
+    elif query.data == 'show_predictions':
+        user_id = str(query.from_user.id)
+        
+        # Проверяем баланс пользователя
+        balance = await get_user_balance(user_id)
+        if balance < PREDICTION_COST:
+            await query.edit_message_text(
+                f"❌ У вас недостаточно монет для прогноза!\n"
+                f"Стоимость прогноза: {PREDICTION_COST} монет\n"
+                f"Ваш баланс: {balance} монет",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Назад", callback_data='back_to_main')]])
+            )
+            return
+        
+        # Получаем текущие матчи
+        matches = await fetch_matches()
+        
+        # Фильтруем матчи, на которые можно сделать прогноз
+        has_vip = has_active_item(user_id, 'vip_predict')
+        
+        if has_vip:
+            # Для VIP пользователей - все текущие матчи
+            available_matches = [m for m in matches if m['status'] in ['SCHEDULED', 'LIVE', 'IN_PLAY', 'PAUSED']]
+        else:
             # Для обычных пользователей - только запланированные матчи
             available_matches = [m for m in matches if m['status'] == 'SCHEDULED']
         
