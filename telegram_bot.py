@@ -34,7 +34,10 @@ def check_running():
             return True
         except (OSError, ValueError):
             # Если процесс не существует или файл поврежден
-            os.remove(LOCK_FILE)
+            try:
+                os.remove(LOCK_FILE)
+            except OSError:
+                logger.warning("Не удалось удалить поврежденный файл блокировки")
     return False
 
 def create_lock():
@@ -50,12 +53,21 @@ def create_lock():
     try:
         with open(LOCK_FILE, 'w') as f:
             f.write(str(os.getpid()))
+        logger.info(f"Создан файл блокировки для процесса {os.getpid()}")
     except Exception as e:
         logger.error(f"Ошибка при создании файла блокировки: {str(e)}")
 
 def remove_lock():
     if os.path.exists(LOCK_FILE):
-        os.remove(LOCK_FILE)
+        try:
+            # Проверяем, принадлежит ли файл блокировки текущему процессу
+            with open(LOCK_FILE, 'r') as f:
+                pid = int(f.read().strip())
+            if pid == os.getpid():
+                os.remove(LOCK_FILE)
+                logger.info(f"Удален файл блокировки для процесса {os.getpid()}")
+        except (OSError, ValueError) as e:
+            logger.warning(f"Ошибка при удалении файла блокировки: {str(e)}")
 
 # Регистрируем функцию удаления файла блокировки при выходе
 atexit.register(remove_lock)
@@ -310,8 +322,8 @@ def save_user_data(currency_data, predictions_data, names_data, items_data, stat
         # Создаем директорию, если она не существует
         os.makedirs(os.path.dirname(USER_DATA_FILE) or '.', exist_ok=True)
         
-        with open(USER_DATA_FILE, 'w') as f:
-            json.dump(data, f, indent=4)
+    with open(USER_DATA_FILE, 'w') as f:
+        json.dump(data, f, indent=4)
         logger.info(f"Данные пользователей успешно сохранены в {USER_DATA_FILE}")
     except Exception as e:
         logger.error(f"Ошибка при сохранении данных пользователей: {str(e)}")
@@ -852,7 +864,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         save_user_data(user_currency, user_predictions, user_names, user_items, user_statuses, user_nicknames, user_roles)
             
             if not role_expired:
-                keyboard.append([InlineKeyboardButton("🔐 Админ-панель", callback_data='admin_panel')])
+            keyboard.append([InlineKeyboardButton("🔐 Админ-панель", callback_data='admin_panel')])
         
         reply_markup = InlineKeyboardMarkup(keyboard)
         
@@ -1941,8 +1953,27 @@ async def handle_prediction_input(update: Update, context: ContextTypes.DEFAULT_
     user_id = str(update.effective_user.id)
     prediction_text = update.message.text.strip()
     
+    # Логируем получение прогноза
+    logger.info(f"Получен прогноз от пользователя {user_id}: {prediction_text}")
+    
+    # Проверяем наличие информации о матче в контексте
+    match_info = context.user_data.get('predicting_match', {})
+    if not match_info:
+        logger.error(f"Информация о матче не найдена для пользователя {user_id}")
+        await update.message.reply_text("❌ Информация о матче не найдена! Пожалуйста, выберите матч заново.")
+        return
+    
+    home_team = match_info.get('home')
+    away_team = match_info.get('away')
+    
+    if not home_team or not away_team:
+        logger.error(f"Неполная информация о матче для пользователя {user_id}: {match_info}")
+        await update.message.reply_text("❌ Неполная информация о матче! Пожалуйста, выберите матч заново.")
+        return
+    
     # Проверяем формат прогноза
     if not re.match(r'^\d+-\d+$', prediction_text):
+        logger.warning(f"Неверный формат прогноза от пользователя {user_id}: {prediction_text}")
         await update.message.reply_text(
             "❌ Неверный формат прогноза!\n"
             f"Введите прогноз в формате 'X-Y', где:\n"
@@ -1952,14 +1983,6 @@ async def handle_prediction_input(update: Update, context: ContextTypes.DEFAULT_
         )
         return
     
-    # Получаем информацию о матче из контекста
-    match_info = context.user_data.get('predicting_match', {})
-    if not match_info:
-        await update.message.reply_text("❌ Информация о матче не найдена!")
-        return
-    
-    home_team = match_info['home']
-    away_team = match_info['away']
     double_reward = match_info.get('double_reward', False)
     insurance = match_info.get('insurance', False)
     
@@ -1988,77 +2011,33 @@ async def handle_prediction_input(update: Update, context: ContextTypes.DEFAULT_
         use_item(user_id, 'insurance')
         boosters_text += "\n🛡️ Бустер 'Страховка' активирован!"
     
-    try:
-        final_home, final_away = map(int, match['score'].split(' : '))
-        
-        # Проверяем все прогнозы для этого матча
-        for user_id, prediction_data in user_predictions[match_id].items():
-            pred_home, pred_away = prediction_data['scores']
-            boosters = prediction_data.get('boosters', {})
-            
-            if pred_home == final_home and pred_away == final_away:
-                # Точное попадание
-                reward = PREDICTION_REWARD_EXACT
-                if boosters.get('double_reward'):
-                    reward *= 2
-                
-                await update_user_balance(user_id, reward)
-                try:
-                    await application.bot.send_message(
-                        chat_id=user_id,
-                        text=f"🎉 Ваш прогноз на матч {match['home']} - {match['away']} оказался точным!\n"
-                             f"💰 Вы получаете {reward} монет!"
-                    )
-                except Exception as e:
-                    logger.error(f"Ошибка отправки уведомления о выигрыше: {str(e)}")
-            elif pred_home == final_home or pred_away == final_away:
-                # Правильная разница голов
-                reward = PREDICTION_REWARD_DIFF
-                if boosters.get('double_reward'):
-                    reward *= 2
-                
-                await update_user_balance(user_id, reward)
-                try:
-                    await application.bot.send_message(
-                        chat_id=user_id,
-                        text=f"🎉 Ваш прогноз на матч {match['home']} - {match['away']} оказался правильным!\n"
-                             f"💰 Вы получаете {reward} монет!"
-                    )
-                except Exception as e:
-                    logger.error(f"Ошибка отправки уведомления о выигрыше: {str(e)}")
-            elif pred_home == final_home and pred_away == final_away:
-                # Правильный исход
-                reward = PREDICTION_REWARD_OUTCOME
-                if boosters.get('double_reward'):
-                    reward *= 2
-                
-                await update_user_balance(user_id, reward)
-                try:
-                    await application.bot.send_message(
-                        chat_id=user_id,
-                        text=f"🎉 Ваш прогноз на матч {match['home']} - {match['away']} оказался правильным!\n"
-                             f"💰 Вы получаете {reward} монет!"
-                    )
-                except Exception as e:
-                    logger.error(f"Ошибка отправки уведомления о выигрыше: {str(e)}")
-            elif boosters.get('insurance'):
-                # Возврат ставки при наличии страховки
-                await update_user_balance(user_id, PREDICTION_COST)
-                try:
-                    await application.bot.send_message(
-                        chat_id=user_id,
-                        text=f"🛡️ Сработала страховка! Ваша ставка {PREDICTION_COST} монет на матч {match['home']} - {match['away']} возвращена."
-                    )
-                except Exception as e:
-                    logger.error(f"Ошибка отправки уведомления о страховке: {str(e)}")
-        
-        # Очищаем прогнозы для завершенного матча
-        del user_predictions[match_id]
-        # Сохраняем обновленные данные
-        save_user_data(user_currency, user_predictions, user_names, user_items, user_statuses, user_nicknames, user_roles)
-        
-    except (ValueError, KeyError) as e:
-        logger.error(f"Ошибка при проверке прогнозов: {str(e)}")
+    # Сохраняем обновленные данные
+    save_user_data(user_currency, user_predictions, user_names, user_items, user_statuses, user_nicknames, user_roles)
+    
+    # Очищаем состояние прогноза в контексте пользователя
+    context.user_data.pop('predicting_match', None)
+    
+    # Отправляем подтверждение
+    await update.message.reply_text(
+        f"✅ Ваш прогноз на матч {home_team} vs {away_team} принят: {prediction_text}\n"
+        f"💰 С вашего счета списано {PREDICTION_COST} монет."
+        f"{boosters_text}\n\n"
+        f"Результаты будут доступны после завершения матча."
+    )
+    
+    logger.info(f"Прогноз пользователя {user_id} на матч {match_id} успешно сохранен: {prediction_text}")
+    
+    # Предлагаем вернуться в главное меню
+    keyboard = [
+        [InlineKeyboardButton("🔙 Главное меню", callback_data="back_to_main")],
+        [InlineKeyboardButton("🔄 Сделать еще прогноз", callback_data="predict")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await update.message.reply_text(
+        "Что вы хотите сделать дальше?",
+        reply_markup=reply_markup
+    )
 
 async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /admin"""
@@ -2150,7 +2129,7 @@ async def handle_admin_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 else:
                     has_access = True
             else:
-                has_access = True
+            has_access = True
     
     if not has_access:
         return
@@ -3066,10 +3045,28 @@ async def run_bot():
         
         logger.info("Бот запущен и готов к работе!")
         
-        await application.run_polling(allowed_updates=Update.ALL_TYPES)
+        # Настраиваем обработку сигналов для корректного завершения
+        def signal_handler(sig, frame):
+            logger.info("Получен сигнал завершения работы...")
+            if application:
+                asyncio.create_task(application.stop())
+            remove_lock()
+            
+        signal.signal(signal.SIGINT, signal_handler)
+        signal.signal(signal.SIGTERM, signal_handler)
+        
+        # Запускаем бота с настройками для предотвращения конфликтов getUpdates
+        await application.run_polling(
+            allowed_updates=Update.ALL_TYPES,
+            drop_pending_updates=True,  # Игнорировать накопившиеся обновления
+            close_loop=False  # Не закрывать цикл событий автоматически
+        )
         
     except Exception as e:
         logger.error(f"Ошибка при запуске бота: {str(e)}")
+    finally:
+        # Удаляем файл блокировки при завершении
+        remove_lock()
 
 async def shop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /shop"""
@@ -3375,7 +3372,7 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 else:
                     has_access = True
             else:
-                has_access = True
+            has_access = True
     
     if not has_access:
         await query.answer("❌ У вас нет доступа к панели администратора!")
