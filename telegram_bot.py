@@ -28,6 +28,9 @@ def check_running():
                 pid = int(f.read().strip())
             # Проверяем, существует ли процесс с таким PID
             os.kill(pid, 0)
+            # Если процесс существует, проверяем, не является ли он текущим процессом
+            if pid == os.getpid():
+                return False
             return True
         except (OSError, ValueError):
             # Если процесс не существует или файл поврежден
@@ -35,8 +38,20 @@ def check_running():
     return False
 
 def create_lock():
-    with open(LOCK_FILE, 'w') as f:
-        f.write(str(os.getpid()))
+    # Проверяем, существует ли файл блокировки
+    if os.path.exists(LOCK_FILE):
+        try:
+            # Пытаемся удалить существующий файл блокировки
+            os.remove(LOCK_FILE)
+        except OSError:
+            logger.warning("Не удалось удалить существующий файл блокировки")
+    
+    # Создаем новый файл блокировки
+    try:
+        with open(LOCK_FILE, 'w') as f:
+            f.write(str(os.getpid()))
+    except Exception as e:
+        logger.error(f"Ошибка при создании файла блокировки: {str(e)}")
 
 def remove_lock():
     if os.path.exists(LOCK_FILE):
@@ -2998,6 +3013,14 @@ async def run_bot():
     global application
     
     try:
+        # Проверяем, не запущен ли уже бот
+        if check_running():
+            logger.error("Бот уже запущен! Завершение работы...")
+            return
+        
+        # Создаем файл блокировки
+        create_lock()
+        
         config = load_config()
         if not config["bot_token"]:
             logger.error("Токен бота не настроен!")
@@ -3667,18 +3690,13 @@ def get_match_status_text(status):
     return status_map.get(status, status)
 
 if __name__ == "__main__":
-    # Проверяем, не запущен ли уже бот
-    if check_running():
-        logger.error("Бот уже запущен! Завершение работы...")
-        sys.exit(1)
-    
-    # Создаем файл блокировки
-    create_lock()
-    
     try:
+        # Проверка на запущенный экземпляр перенесена в run_bot()
         asyncio.run(run_bot())
     except KeyboardInterrupt:
         logger.info("Получен сигнал завершения работы...")
+    except Exception as e:
+        logger.error(f"Критическая ошибка: {str(e)}")
     finally:
         # Удаляем файл блокировки при завершении
         remove_lock()
