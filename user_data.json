@@ -1,0 +1,33 @@
+{
+    "user_currency": {
+        "791190609": 97000,
+        "50564071": 1000,
+        "6743502942": 11000
+    },
+    "user_predictions": {},
+    "user_names": {
+        "791190609": "@safaraliev07",
+        "50564071": "@dlya1968"
+    },
+    "user_items": {
+        "791190609": {
+            "priority_notifications": "2025-04-14T21:06:05.803913+00:00",
+            "tournament_tables": "2025-04-14T21:06:07.968469+00:00",
+            "extended_stats": "2025-04-14T21:06:08.763646+00:00",
+            "vip_status": "2025-03-22T21:06:11.456325+00:00"
+        },
+        "50564071": {
+            "double_reward": 1
+        }
+    },
+    "user_statuses": {
+        "791190609": "The real G.O.A.T"
+    },
+    "user_nicknames": {
+        "791190609": "Ronaldo",
+        "50564071": "Neeet"
+    },
+    "user_roles": {
+        "791190609": "developer"
+    }
+}
