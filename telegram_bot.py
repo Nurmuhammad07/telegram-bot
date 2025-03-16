@@ -40,7 +40,7 @@ def check_running():
                 
                 pid, start_time = map(int, stored_data)
                 
-                # Проверяем, существует ли процесс с таким PID
+            # Проверяем, существует ли процесс с таким PID
                 try:
                     os.kill(pid, 0)
                     # Если процесс существует и это не текущий процесс
@@ -52,7 +52,7 @@ def check_running():
                             logger.warning(f"Обнаружен зависший процесс (PID: {pid}), удаляем блокировку")
                             os.remove(LOCK_FILE)
                             return False
-                        return True
+                    return True
                 except OSError:
                     # Процесс не существует
                     logger.info(f"Найден файл блокировки от несуществующего процесса (PID: {pid}), удаляем")
@@ -75,7 +75,7 @@ def create_lock():
         # Записываем PID и время запуска
         with open(LOCK_FILE, 'w') as f:
             f.write(f"{os.getpid()}:{int(time.time())}")
-        logger.info(f"Создан файл блокировки для процесса {os.getpid()}")
+            logger.info(f"Создан файл блокировки для процесса {os.getpid()}")
         return True
     except Exception as e:
         logger.error(f"Ошибка при создании файла блокировки: {str(e)}")
@@ -285,6 +285,7 @@ COMMANDS = {
     'top': 'Показать топ предсказателей',
     'shop': 'Открыть магазин',
     'prognoz': 'Показать прогнозы на предстоящие матчи',
+    'stream': 'Смотреть трансляции матчей',
     'admin': 'Панель администратора (только для админа)'
 }
 
@@ -325,15 +326,15 @@ def load_user_data():
             with open(railway_file, 'r') as f:
                 data = json.load(f)
                 logger.info(f"Данные успешно загружены из Railway volume: {railway_file}")
-                return (
-                    data.get('user_currency', {}),
-                    data.get('user_predictions', {}),
-                    data.get('user_names', {}),
-                    data.get('user_items', {}),
-                    data.get('user_statuses', {}),
-                    data.get('user_nicknames', {}),
-                    data.get('user_roles', {})
-                )
+            return (
+                data.get('user_currency', {}),
+                data.get('user_predictions', {}),
+                data.get('user_names', {}),
+                data.get('user_items', {}),
+                data.get('user_statuses', {}),
+                data.get('user_nicknames', {}),
+                data.get('user_roles', {})
+            )
         except FileNotFoundError:
             logger.info(f"Файл в Railway volume не найден: {railway_file}")
         except Exception as e:
@@ -471,7 +472,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton("⚽️ Матчи", callback_data='today_matches'),
          InlineKeyboardButton("🎯 Прогнозы", callback_data='show_predictions')],
-        [InlineKeyboardButton("📊 Прогнозы матчей", callback_data='upcoming_matches')],
+        [InlineKeyboardButton("📊 Прогнозы матчей", callback_data='upcoming_matches'),
+         InlineKeyboardButton("📺 Трансляции", callback_data='show_streams')],
         [InlineKeyboardButton("💰 Баланс", callback_data='show_balance'),
          InlineKeyboardButton("🏆 Топ игроков", callback_data='show_top')],
         [InlineKeyboardButton("🏪 Магазин", callback_data='show_shop'),
@@ -900,7 +902,8 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = [
             [InlineKeyboardButton("⚽️ Матчи", callback_data='today_matches'),
              InlineKeyboardButton("🎯 Прогнозы", callback_data='show_predictions')],
-            [InlineKeyboardButton("📊 Прогнозы матчей", callback_data='upcoming_matches')],
+            [InlineKeyboardButton("📊 Прогнозы матчей", callback_data='upcoming_matches'),
+             InlineKeyboardButton("📺 Трансляции", callback_data='show_streams')],
             [InlineKeyboardButton("💰 Баланс", callback_data='show_balance'),
              InlineKeyboardButton("🏆 Топ игроков", callback_data='show_top')],
             [InlineKeyboardButton("🏪 Магазин", callback_data='show_shop'),
@@ -944,6 +947,16 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         
         await query.edit_message_text(welcome_message, reply_markup=reply_markup)
+    
+    elif query.data == 'show_streams':
+        # Создаем фейковый объект Update для передачи в stream_command
+        class FakeUpdate:
+            def __init__(self, message, effective_user):
+                self.message = message
+                self.effective_user = effective_user
+        
+        fake_update = FakeUpdate(query.message, query.from_user)
+        await stream_command(fake_update, context)
     
     elif query.data == 'show_predictions':
         user_id = str(query.from_user.id)
@@ -3085,6 +3098,9 @@ async def run_bot():
         # Проверка предстоящих матчей каждые 30 секунд
         job_queue.run_repeating(check_and_send_match_reminders, interval=30)
         
+        # Проверка матчей для трансляции каждую минуту
+        job_queue.run_repeating(check_live_matches_for_streaming, interval=60)
+        
         # Сохранение данных каждые 5 минут
         job_queue.run_repeating(lambda ctx: save_data_periodically(), interval=300)
         
@@ -3740,6 +3756,7 @@ def register_handlers(app):
     app.add_handler(CommandHandler("table", show_tournament_tables))
     app.add_handler(CommandHandler("shop", shop_command))
     app.add_handler(CommandHandler("prognoz", prognoz_command))
+    app.add_handler(CommandHandler("stream", stream_command))
     
     # Обработчик кнопок
     app.add_handler(CallbackQueryHandler(button))
@@ -3791,6 +3808,139 @@ async def check_items_expiry(context: ContextTypes.DEFAULT_TYPE):
     
     except Exception as e:
         logger.error(f"Ошибка при проверке срока действия предметов: {str(e)}")
+
+async def check_live_matches_for_streaming(context: ContextTypes.DEFAULT_TYPE):
+    """Проверка матчей в прямом эфире для отправки ссылок на трансляцию"""
+    try:
+        # Получаем текущие матчи
+        matches = await fetch_matches()
+        
+        # Фильтруем только матчи в прямом эфире с участием избранных команд
+        streaming_teams = ["Real Madrid", "Barcelona", "Manchester City"]
+        live_matches = []
+        
+        for match in matches:
+            # Проверяем, идет ли матч в прямом эфире
+            if match['status'] in ['LIVE', 'IN_PLAY']:
+                home_team = match['homeTeam']
+                away_team = match['awayTeam']
+                
+                # Проверяем, участвует ли одна из избранных команд
+                if home_team in streaming_teams or away_team in streaming_teams:
+                    live_matches.append(match)
+        
+        # Если есть матчи для трансляции
+        if live_matches:
+            # Получаем список пользователей, подписанных на уведомления
+            config = load_config()
+            user_settings = config.get("user_settings", {})
+            
+            for match in live_matches:
+                match_id = match['id']
+                home_team = match['homeTeam']
+                away_team = match['awayTeam']
+                home_score = match.get('score', {}).get('home', 0)
+                away_score = match.get('score', {}).get('away', 0)
+                
+                # Формируем ссылку на трансляцию
+                stream_url = f"https://your-website.com/stream.html?match_id={match_id}&home_team={home_team}&away_team={away_team}&home_score={home_score}&away_score={away_score}&status=LIVE"
+                
+                # Формируем сообщение
+                message = (
+                    f"🔴 ПРЯМАЯ ТРАНСЛЯЦИЯ!\n\n"
+                    f"⚽️ {home_team} {home_score} - {away_score} {away_team}\n\n"
+                    f"Смотрите матч в прямом эфире по ссылке:\n"
+                    f"{stream_url}"
+                )
+                
+                # Отправляем сообщение всем пользователям, подписанным на уведомления
+                for user_id, settings in user_settings.items():
+                    # Проверяем, подписан ли пользователь на уведомления о матчах
+                    if settings.get("notifications", True):
+                        # Проверяем, подписан ли пользователь на команды этого матча
+                        user_teams = settings.get("teams", [])
+                        if not user_teams or home_team in user_teams or away_team in user_teams:
+                            try:
+                                # Создаем клавиатуру с кнопкой для перехода на трансляцию
+                                keyboard = [
+                                    [InlineKeyboardButton("📺 Смотреть трансляцию", url=stream_url)]
+                                ]
+                                reply_markup = InlineKeyboardMarkup(keyboard)
+                                
+                                # Отправляем сообщение
+                                await context.bot.send_message(
+                                    chat_id=user_id,
+                                    text=message,
+                                    reply_markup=reply_markup
+                                )
+                                logger.info(f"Отправлена ссылка на трансляцию матча {home_team} vs {away_team} пользователю {user_id}")
+                            except Exception as e:
+                                logger.error(f"Ошибка при отправке ссылки на трансляцию пользователю {user_id}: {str(e)}")
+    
+    except Exception as e:
+        logger.error(f"Ошибка при проверке матчей для трансляции: {str(e)}")
+
+async def stream_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик команды /stream"""
+    user_id = str(update.effective_user.id)
+    
+    # Получаем текущие матчи
+    matches = await fetch_matches()
+    
+    # Фильтруем только матчи в прямом эфире с участием избранных команд
+    streaming_teams = ["Real Madrid", "Barcelona", "Manchester City"]
+    live_matches = []
+    
+    for match in matches:
+        # Проверяем, идет ли матч в прямом эфире
+        if match['status'] in ['LIVE', 'IN_PLAY']:
+            home_team = match['homeTeam']
+            away_team = match['awayTeam']
+            
+            # Проверяем, участвует ли одна из избранных команд
+            if home_team in streaming_teams or away_team in streaming_teams:
+                live_matches.append(match)
+    
+    # Если есть матчи для трансляции
+    if live_matches:
+        message = "📺 Доступные трансляции:\n\n"
+        
+        keyboard = []
+        for match in live_matches:
+            match_id = match['id']
+            home_team = match['homeTeam']
+            away_team = match['awayTeam']
+            home_score = match.get('score', {}).get('home', 0)
+            away_score = match.get('score', {}).get('away', 0)
+            
+            # Формируем ссылку на трансляцию
+            stream_url = f"https://your-website.com/stream.html?match_id={match_id}&home_team={home_team}&away_team={away_team}&home_score={home_score}&away_score={away_score}&status=LIVE"
+            
+            message += f"⚽️ {home_team} {home_score} - {away_score} {away_team}\n"
+            
+            # Добавляем кнопку для перехода на трансляцию
+            keyboard.append([InlineKeyboardButton(f"📺 {home_team} vs {away_team}", url=stream_url)])
+        
+        keyboard.append([InlineKeyboardButton("🔙 Главное меню", callback_data='back_to_main')])
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await update.message.reply_text(message, reply_markup=reply_markup)
+    else:
+        # Если нет матчей для трансляции
+        message = (
+            "😔 В данный момент нет доступных трансляций.\n\n"
+            "Трансляции доступны только для матчей следующих команд:\n"
+            "• Real Madrid\n"
+            "• Barcelona\n"
+            "• Manchester City\n\n"
+            "Когда начнется матч с участием одной из этих команд, "
+            "вы получите уведомление с ссылкой на трансляцию."
+        )
+        
+        keyboard = [[InlineKeyboardButton("🔙 Главное меню", callback_data='back_to_main')]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await update.message.reply_text(message, reply_markup=reply_markup)
 
 if __name__ == "__main__":
     try:

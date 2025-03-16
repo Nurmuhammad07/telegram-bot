@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Футбольная трансляция</title>
+    <style>
+        body {
+            font-family: 'Roboto', Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #121212;
+            color: #fff;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        header {
+            background-color: #1e1e1e;
+            padding: 15px 0;
+            text-align: center;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+        }
+        h1 {
+            margin: 0;
+            color: #fff;
+            font-size: 24px;
+        }
+        .match-info {
+            background-color: #1e1e1e;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 20px 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .team {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: 40%;
+        }
+        .team img {
+            width: 80px;
+            height: 80px;
+            object-fit: contain;
+            margin-bottom: 10px;
+        }
+        .team-name {
+            font-size: 18px;
+            font-weight: bold;
+            text-align: center;
+        }
+        .score {
+            font-size: 32px;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+        }
+        .vs {
+            margin: 0 10px;
+            color: #888;
+        }
+        .status {
+            background-color: #ff4d4d;
+            color: white;
+            padding: 5px 10px;
+            border-radius: 4px;
+            font-size: 14px;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+        .video-container {
+            position: relative;
+            padding-bottom: 56.25%; /* 16:9 */
+            height: 0;
+            overflow: hidden;
+            border-radius: 8px;
+            background-color: #000;
+            margin-bottom: 20px;
+        }
+        .video-container iframe, 
+        .video-container object, 
+        .video-container embed {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            border: none;
+        }
+        .chat {
+            background-color: #1e1e1e;
+            border-radius: 8px;
+            padding: 15px;
+            height: 300px;
+            overflow-y: auto;
+        }
+        .chat-title {
+            margin-top: 0;
+            margin-bottom: 15px;
+            font-size: 18px;
+            color: #ddd;
+        }
+        .message {
+            margin-bottom: 10px;
+            padding: 8px 12px;
+            background-color: #2a2a2a;
+            border-radius: 4px;
+        }
+        .username {
+            font-weight: bold;
+            color: #4d94ff;
+            margin-right: 5px;
+        }
+        .time {
+            font-size: 12px;
+            color: #888;
+        }
+        .message-text {
+            margin-top: 5px;
+        }
+        .stream-options {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+        .stream-button {
+            background-color: #333;
+            border: none;
+            color: white;
+            padding: 8px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        .stream-button:hover {
+            background-color: #444;
+        }
+        .stream-button.active {
+            background-color: #4d94ff;
+        }
+        .back-button {
+            display: inline-block;
+            background-color: #4d94ff;
+            color: white;
+            padding: 10px 20px;
+            text-decoration: none;
+            border-radius: 4px;
+            margin-bottom: 20px;
+            transition: background-color 0.3s;
+        }
+        .back-button:hover {
+            background-color: #3a7bd5;
+        }
+        @media (max-width: 768px) {
+            .match-info {
+                flex-direction: column;
+            }
+            .team {
+                width: 100%;
+                margin-bottom: 15px;
+            }
+            .score {
+                margin: 15px 0;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="container">
+            <h1>Футбольная трансляция</h1>
+        </div>
+    </header>
+
+    <div class="container">
+        <a href="https://t.me/your_bot_username" class="back-button">← Вернуться в бот</a>
+        
+        <div class="match-info">
+            <div class="team home-team">
+                <img src="" id="home-logo" alt="Домашняя команда">
+                <div class="team-name" id="home-team">Загрузка...</div>
+            </div>
+            
+            <div class="score">
+                <span id="home-score">0</span>
+                <span class="vs">:</span>
+                <span id="away-score">0</span>
+            </div>
+            
+            <div class="team away-team">
+                <img src="" id="away-logo" alt="Гостевая команда">
+                <div class="team-name" id="away-team">Загрузка...</div>
+            </div>
+        </div>
+        
+        <div class="status" id="match-status">LIVE</div>
+        
+        <div class="stream-options">
+            <button class="stream-button active" data-source="1">Источник 1</button>
+            <button class="stream-button" data-source="2">Источник 2</button>
+            <button class="stream-button" data-source="3">Источник 3</button>
+        </div>
+        
+        <div class="video-container" id="video-container">
+            <!-- Здесь будет iframe с трансляцией -->
+            <iframe id="stream-frame" src="" frameborder="0" allowfullscreen></iframe>
+        </div>
+        
+        <div class="chat">
+            <h3 class="chat-title">Чат трансляции</h3>
+            <div class="message">
+                <span class="username">Admin:</span>
+                <span class="time">12:45</span>
+                <div class="message-text">Добро пожаловать на трансляцию!</div>
+            </div>
+            <div class="message">
+                <span class="username">Футбольный фанат:</span>
+                <span class="time">12:46</span>
+                <div class="message-text">Отличный матч сегодня!</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Получаем параметры из URL
+        const urlParams = new URLSearchParams(window.location.search);
+        const matchId = urlParams.get('match_id');
+        const homeTeam = urlParams.get('home_team');
+        const awayTeam = urlParams.get('away_team');
+        const homeScore = urlParams.get('home_score') || '0';
+        const awayScore = urlParams.get('away_score') || '0';
+        const status = urlParams.get('status') || 'LIVE';
+        
+        // Устанавливаем данные матча
+        document.getElementById('home-team').textContent = homeTeam || 'Домашняя команда';
+        document.getElementById('away-team').textContent = awayTeam || 'Гостевая команда';
+        document.getElementById('home-score').textContent = homeScore;
+        document.getElementById('away-score').textContent = awayScore;
+        document.getElementById('match-status').textContent = status;
+        
+        // Устанавливаем логотипы команд
+        const teamLogos = {
+            'Real Madrid': 'https://upload.wikimedia.org/wikipedia/en/5/56/Real_Madrid_CF.svg',
+            'Barcelona': 'https://upload.wikimedia.org/wikipedia/en/4/47/FC_Barcelona_%28crest%29.svg',
+            'Manchester City': 'https://upload.wikimedia.org/wikipedia/en/e/eb/Manchester_City_FC_badge.svg',
+            'Manchester United': 'https://upload.wikimedia.org/wikipedia/en/7/7a/Manchester_United_FC_crest.svg',
+            'Liverpool': 'https://upload.wikimedia.org/wikipedia/en/0/0c/Liverpool_FC.svg',
+            'Chelsea': 'https://upload.wikimedia.org/wikipedia/en/c/cc/Chelsea_FC.svg',
+            'Arsenal': 'https://upload.wikimedia.org/wikipedia/en/5/53/Arsenal_FC.svg',
+            'Bayern Munich': 'https://upload.wikimedia.org/wikipedia/commons/1/1b/FC_Bayern_M%C3%BCnchen_logo_%282017%29.svg',
+            'PSG': 'https://upload.wikimedia.org/wikipedia/en/a/a7/Paris_Saint-Germain_F.C..svg'
+        };
+        
+        document.getElementById('home-logo').src = teamLogos[homeTeam] || '';
+        document.getElementById('away-logo').src = teamLogos[awayTeam] || '';
+        
+        // Источники трансляции (замените на реальные)
+        const streamSources = {
+            '1': `https://example.com/embed/stream1?match=${matchId}`,
+            '2': `https://example.com/embed/stream2?match=${matchId}`,
+            '3': `https://example.com/embed/stream3?match=${matchId}`
+        };
+        
+        // Устанавливаем начальный источник
+        document.getElementById('stream-frame').src = streamSources['1'];
+        
+        // Обработчики кнопок переключения источников
+        document.querySelectorAll('.stream-button').forEach(button => {
+            button.addEventListener('click', function() {
+                const source = this.getAttribute('data-source');
+                
+                // Обновляем активную кнопку
+                document.querySelectorAll('.stream-button').forEach(btn => {
+                    btn.classList.remove('active');
+                });
+                this.classList.add('active');
+                
+                // Обновляем источник трансляции
+                document.getElementById('stream-frame').src = streamSources[source];
+            });
+        });
+        
+        // Функция для обновления данных матча
+        function updateMatchData() {
+            fetch(`/api/match/${matchId}`)
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('home-score').textContent = data.home_score;
+                    document.getElementById('away-score').textContent = data.away_score;
+                    document.getElementById('match-status').textContent = data.status;
+                })
+                .catch(error => console.error('Ошибка при обновлении данных:', error));
+        }
+        
+        // Обновляем данные каждые 30 секунд
+        setInterval(updateMatchData, 30000);
+    </script>
+</body>
+</html> 
