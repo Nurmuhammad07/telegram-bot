@@ -69,7 +69,13 @@ async def show_shop_category(query: CallbackQuery, category: str, SHOP_ITEMS):
     keyboard.append([InlineKeyboardButton("🔙 К категориям", callback_data='shop')])
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await query.edit_message_text(text, reply_markup=reply_markup)
+    try:
+        await query.edit_message_text(text, reply_markup=reply_markup)
+    except Exception as e:
+        # Игнорируем ошибку "Message is not modified"
+        if "Message is not modified" not in str(e):
+            logger.error(f"Ошибка при отображении категории магазина: {str(e)}")
+            await query.answer("❌ Произошла ошибка при отображении категории")
 
 async def process_purchase(query: CallbackQuery, item_id: str, SHOP_ITEMS, user_currency, user_items, user_statuses, user_nicknames, user_roles, update_user_balance, save_user_data):
     """Обработка покупки предмета"""
@@ -162,7 +168,22 @@ async def process_purchase(query: CallbackQuery, item_id: str, SHOP_ITEMS, user_
     await query.answer(f"✅ Вы успешно приобрели {item['name']}!")
     
     category = item.get('category', 'boosters')
-    await show_shop_category(query, category, SHOP_ITEMS)
+    try:
+        await show_shop_category(query, category, SHOP_ITEMS)
+    except Exception as e:
+        # Игнорируем ошибку "Message is not modified"
+        if "Message is not modified" not in str(e):
+            logger.error(f"Ошибка при отображении категории после покупки: {str(e)}")
+            # Пытаемся вернуться в магазин
+            try:
+                keyboard = [[InlineKeyboardButton("🔙 Вернуться в магазин", callback_data='shop')]]
+                await query.edit_message_text(
+                    f"✅ Вы успешно приобрели {item['name']}!\n\n"
+                    "Произошла ошибка при отображении категории.",
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
+            except:
+                pass
 
 def has_active_item(user_id: str, item_id: str, user_items):
     """Проверка наличия активного предмета у пользователя"""
