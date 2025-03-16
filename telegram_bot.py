@@ -703,8 +703,8 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Назначаем роль пользователю
             user_roles[target_user_id] = role_name
             
-            # Если роль покупается в магазине, добавляем срок действия
-            if 'shop_role_purchase' in context.user_data:
+            # Добавляем срок действия роли (30 дней) для всех ролей кроме developer и user
+            if role_name not in ['developer', 'user']:
                 # Добавляем информацию о сроке действия роли (30 дней)
                 if 'role_expiry' not in user_items.get(target_user_id, {}):
                     if target_user_id not in user_items:
@@ -712,12 +712,29 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     user_items[target_user_id]['role_expiry'] = {}
                 
                 user_items[target_user_id]['role_expiry'][role_name] = int(time.time()) + (30 * 24 * 60 * 60)  # 30 дней
+            
+            # Если роль покупается в магазине, очищаем флаг
+            if 'shop_role_purchase' in context.user_data:
                 context.user_data.pop('shop_role_purchase', None)
             
             save_user_data(user_currency, user_predictions, user_names, user_items, user_statuses, user_nicknames, user_roles)
             
+            # Получаем имя пользователя из доступных словарей
+            user_name = user_names.get(target_user_id) or user_nicknames.get(target_user_id) or f"User{target_user_id}"
+            
+            # Отправляем уведомление пользователю о назначении роли
+            try:
+                role_info = USER_ROLES.get(role_name, {'name': role_name})
+                await context.bot.send_message(
+                    chat_id=target_user_id,
+                    text=f"🎖️ Вам назначена роль: {role_info['name']}!\n"
+                         f"Теперь у вас есть доступ к дополнительным функциям бота."
+                )
+            except Exception as e:
+                logger.error(f"Ошибка отправки уведомления пользователю: {str(e)}")
+            
             await query.edit_message_text(
-                f"✅ Роль {role_name} успешно назначена пользователю {user_names.get(target_user_id, target_user_id)}!"
+                f"✅ Роль {role_name} успешно назначена пользователю {user_name}!"
             )
             
             # Возвращаемся в меню управления ролями
@@ -778,7 +795,21 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             keyboard.append([InlineKeyboardButton("🔐 Админ-панель", callback_data='admin_panel')])
         # Добавляем кнопку админ-панели для пользователей с ролями
         elif user_id in user_roles and user_roles[user_id] in ['admin', 'moderator', 'operator']:
-            keyboard.append([InlineKeyboardButton("🔐 Админ-панель", callback_data='admin_panel')])
+            # Проверяем, не истек ли срок действия роли
+            role_expired = False
+            if user_id in user_items and 'role_expiry' in user_items[user_id]:
+                role = user_roles[user_id]
+                if role in user_items[user_id]['role_expiry']:
+                    expiry_time = user_items[user_id]['role_expiry'][role]
+                    if int(time.time()) > expiry_time:
+                        # Роль истекла, удаляем её
+                        user_roles.pop(user_id, None)
+                        user_items[user_id]['role_expiry'].pop(role, None)
+                        role_expired = True
+                        save_user_data(user_currency, user_predictions, user_names, user_items, user_statuses, user_nicknames, user_roles)
+            
+            if not role_expired:
+                keyboard.append([InlineKeyboardButton("🔐 Админ-панель", callback_data='admin_panel')])
         
         reply_markup = InlineKeyboardMarkup(keyboard)
         
@@ -2052,7 +2083,24 @@ async def handle_admin_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
     elif user_id in user_roles:
         role = user_roles[user_id]
         if role in ['developer', 'admin', 'moderator', 'operator']:
-            has_access = True
+            # Проверяем, не истек ли срок действия роли
+            if role != 'developer':  # Developer не имеет срока действия
+                if user_id in user_items and 'role_expiry' in user_items[user_id]:
+                    if role in user_items[user_id]['role_expiry']:
+                        expiry_time = user_items[user_id]['role_expiry'][role]
+                        if int(time.time()) > expiry_time:
+                            # Роль истекла, удаляем её
+                            user_roles.pop(user_id, None)
+                            user_items[user_id]['role_expiry'].pop(role, None)
+                            save_user_data(user_currency, user_predictions, user_names, user_items, user_statuses, user_nicknames, user_roles)
+                        else:
+                            has_access = True
+                    else:
+                        has_access = True
+                else:
+                    has_access = True
+            else:
+                has_access = True
     
     if not has_access:
         return
