@@ -3094,7 +3094,8 @@ async def run_bot():
         config = load_config()
         
         # Создаем и настраиваем бота с дополнительными параметрами для предотвращения конфликтов
-        application = Application.builder().token(config["bot_token"]).get_updates_request_timeout(30).build()
+        # Используем стандартные методы без get_updates_request_timeout
+        application = Application.builder().token(config["bot_token"]).build()
         
         # Регистрируем обработчики команд
         register_handlers(application)
@@ -3127,9 +3128,11 @@ async def run_bot():
         await application.run_polling(
             allowed_updates=Update.ALL_TYPES,
             drop_pending_updates=True,  # Игнорировать накопившиеся обновления
-            pool_timeout=30.0,  # Увеличиваем таймаут для пула соединений
+            timeout=30,  # Таймаут для long polling
             read_timeout=30.0,  # Увеличиваем таймаут чтения
+            write_timeout=30.0,  # Увеличиваем таймаут записи
             connect_timeout=30.0,  # Увеличиваем таймаут соединения
+            pool_timeout=30.0,  # Увеличиваем таймаут для пула соединений
             close_loop=False,  # Не закрывать цикл событий автоматически
             stop_signals=None  # Отключаем встроенную обработку сигналов, используем свою
         )
