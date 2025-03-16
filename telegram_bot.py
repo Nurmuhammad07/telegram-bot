@@ -255,8 +255,8 @@ FAVORITE_TEAMS = [
 ]
 
 # Файлы для хранения данных
-USER_DATA_FILE = "user_data.json"
-PREDICTIONS_FILE = "predictions.json"
+USER_DATA_FILE = os.path.join(os.environ.get('RAILWAY_VOLUME_MOUNT_PATH', ''), "user_data.json")
+PREDICTIONS_FILE = os.path.join(os.environ.get('RAILWAY_VOLUME_MOUNT_PATH', ''), "predictions.json")
 
 def load_user_data():
     """Загрузка данных пользователей из файла"""
@@ -273,6 +273,10 @@ def load_user_data():
                 data.get('user_roles', {})
             )
     except FileNotFoundError:
+        logger.info(f"Файл данных пользователей не найден по пути: {USER_DATA_FILE}. Создаем новый.")
+        return {}, {}, {}, {}, {}, {}, {}
+    except Exception as e:
+        logger.error(f"Ошибка при загрузке данных пользователей: {str(e)}")
         return {}, {}, {}, {}, {}, {}, {}
 
 def save_user_data(currency_data, predictions_data, names_data, items_data, statuses_data, nicknames_data, roles_data):
@@ -286,8 +290,15 @@ def save_user_data(currency_data, predictions_data, names_data, items_data, stat
         'user_nicknames': nicknames_data,
         'user_roles': roles_data
     }
-    with open(USER_DATA_FILE, 'w') as f:
-        json.dump(data, f, indent=4)
+    try:
+        # Создаем директорию, если она не существует
+        os.makedirs(os.path.dirname(USER_DATA_FILE) or '.', exist_ok=True)
+        
+        with open(USER_DATA_FILE, 'w') as f:
+            json.dump(data, f, indent=4)
+        logger.info(f"Данные пользователей успешно сохранены в {USER_DATA_FILE}")
+    except Exception as e:
+        logger.error(f"Ошибка при сохранении данных пользователей: {str(e)}")
 
 # Загружаем данные при запуске
 user_currency, user_predictions, user_names, user_items, user_statuses, user_nicknames, user_roles = load_user_data()
@@ -976,42 +987,18 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = str(query.from_user.id)
         balance = await get_user_balance(user_id)
         
-        # Получаем активные предметы пользователя
-        active_items = []
-        if user_id in user_items:
-            for item_id, value in user_items[user_id].items():
-                if has_active_item(user_id, item_id):
-                    item = SHOP_ITEMS[item_id]
-                    if isinstance(value, int):
-                        active_items.append(f"{item['name']} (x{value})")
-                    else:
-                        try:
-                            expiration = datetime.fromisoformat(value)
-                            days_left = (expiration - datetime.now(pytz.UTC)).days
-                            active_items.append(f"{item['name']} ({days_left} дн.)")
-                        except (ValueError, TypeError):
-                            continue
-        
-        text = f"💰 Ваш текущий баланс: {balance} монет\n\n"
-        
-        # Добавляем статус пользователя, если есть
-        if user_id in user_statuses:
-            text += f"💭 Ваш статус: {user_statuses[user_id]}\n\n"
-        
-        if active_items:
-            text += "🎁 Ваши активные предметы:\n"
-            for item in active_items:
-                text += f"• {item}\n"
-        else:
-            text += "У вас нет активных предметов"
-        
         keyboard = [
-            [InlineKeyboardButton("🏪 Магазин", callback_data='shop')],
+            [InlineKeyboardButton("💸 Отправить деньги", callback_data='send_money')],
             [InlineKeyboardButton("🔙 Назад", callback_data='back_to_main')]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        await query.edit_message_text(text, reply_markup=reply_markup)
+        await query.edit_message_text(
+            f"💰 Ваш текущий баланс: {balance} монет\n\n"
+            "💡 Вы можете заработать монеты, делая точные прогнозы на матчи!",
+            reply_markup=reply_markup
+        )
+        return
     
     elif query.data == 'shop':
         # Показываем категории магазина
@@ -1344,6 +1331,10 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 InlineKeyboardButton("🔙 Отмена", callback_data='admin_panel')
             ]])
         )
+    
+    elif query.data == 'send_money':
+        await send_money(query, context)
+        return
     
     else:
         await query.answer()
@@ -1787,9 +1778,16 @@ async def balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
     balance = await get_user_balance(user_id)
     
+    keyboard = [
+        [InlineKeyboardButton("💸 Отправить деньги", callback_data='send_money')],
+        [InlineKeyboardButton("🔙 Назад", callback_data='back_to_main')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
     await update.message.reply_text(
         f"💰 Ваш текущий баланс: {balance} монет\n\n"
-        "💡 Вы можете заработать монеты, делая точные прогнозы на матчи!"
+        "💡 Вы можете заработать монеты, делая точные прогнозы на матчи!",
+        reply_markup=reply_markup
     )
 
 async def top_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2699,6 +2697,104 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return True
     
+    # Проверяем ожидание ID пользователя для перевода денег
+    elif 'awaiting_transfer_user_id' in context.user_data:
+        target_user_id = update.message.text.strip()
+        
+        # Проверяем, существует ли пользователь
+        user_exists = (target_user_id in user_names or 
+                       target_user_id in user_currency or 
+                       target_user_id in user_nicknames or
+                       target_user_id in user_predictions)
+        
+        if not user_exists:
+            await update.message.reply_text("❌ Пользователь с таким ID не найден!")
+            context.user_data.pop('awaiting_transfer_user_id', None)
+            return True
+        
+        # Проверяем, не пытается ли пользователь отправить деньги самому себе
+        if target_user_id == user_id:
+            await update.message.reply_text("❌ Вы не можете отправить деньги самому себе!")
+            context.user_data.pop('awaiting_transfer_user_id', None)
+            return True
+        
+        # Сохраняем ID получателя и запрашиваем сумму перевода
+        context.user_data['transfer_target_user_id'] = target_user_id
+        context.user_data.pop('awaiting_transfer_user_id', None)
+        context.user_data['awaiting_transfer_amount'] = True
+        
+        # Получаем имя пользователя из доступных словарей
+        user_name = user_names.get(target_user_id) or user_nicknames.get(target_user_id) or f"User{target_user_id}"
+        
+        await update.message.reply_text(
+            f"Вы собираетесь отправить деньги пользователю {user_name} (ID: {target_user_id}).\n"
+            f"💰 Ваш текущий баланс: {user_currency.get(user_id, 0)} монет.\n\n"
+            "Введите сумму перевода (целое положительное число):"
+        )
+        return True
+    
+    # Проверяем ожидание суммы перевода
+    elif 'awaiting_transfer_amount' in context.user_data:
+        try:
+            amount = int(update.message.text)
+            target_user_id = context.user_data['transfer_target_user_id']
+            
+            # Проверяем корректность суммы
+            if amount <= 0:
+                await update.message.reply_text("❌ Сумма перевода должна быть положительным числом!")
+                return True
+            
+            # Проверяем достаточность средств
+            sender_balance = user_currency.get(user_id, 0)
+            if sender_balance < amount:
+                await update.message.reply_text(
+                    "❌ У вас недостаточно средств для перевода!\n"
+                    f"Ваш баланс: {sender_balance} монет\n"
+                    f"Сумма перевода: {amount} монет"
+                )
+                return True
+            
+            # Выполняем перевод
+            user_currency[user_id] -= amount
+            if target_user_id not in user_currency:
+                user_currency[target_user_id] = 0
+            user_currency[target_user_id] += amount
+            
+            # Сохраняем изменения
+            save_user_data(user_currency, user_predictions, user_names, user_items, user_statuses, user_nicknames, user_roles)
+            
+            # Получаем имена пользователей
+            sender_name = user_names.get(user_id) or user_nicknames.get(user_id) or f"User{user_id}"
+            receiver_name = user_names.get(target_user_id) or user_nicknames.get(target_user_id) or f"User{target_user_id}"
+            
+            # Отправляем уведомление отправителю
+            await update.message.reply_text(
+                f"✅ Вы успешно отправили {amount} монет пользователю {receiver_name}!\n"
+                f"💰 Ваш новый баланс: {user_currency[user_id]} монет"
+            )
+            
+            # Отправляем уведомление получателю
+            try:
+                await context.bot.send_message(
+                    chat_id=target_user_id,
+                    text=f"💰 Вы получили {amount} монет от пользователя {sender_name}!\n"
+                         f"💰 Ваш новый баланс: {user_currency[target_user_id]} монет"
+                )
+            except Exception as e:
+                logger.error(f"Ошибка отправки уведомления получателю: {str(e)}")
+            
+            # Очищаем состояние
+            context.user_data.pop('awaiting_transfer_amount', None)
+            context.user_data.pop('transfer_target_user_id', None)
+            
+        except ValueError:
+            await update.message.reply_text("❌ Пожалуйста, введите корректное число!")
+        except Exception as e:
+            logger.error(f"Ошибка при переводе денег: {str(e)}")
+            await update.message.reply_text("❌ Произошла ошибка при переводе денег. Попробуйте позже.")
+        
+        return True
+    
     # Проверяем ожидание ID пользователя для назначения роли
     elif 'awaiting_user_id_for_role' in context.user_data:
         target_user_id = update.message.text.strip()
@@ -3256,6 +3352,29 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Отвечаем на callback_query, чтобы убрать индикатор загрузки
     await query.answer()
+
+async def send_money(query, context):
+    """Функция для отправки денег другому пользователю"""
+    user_id = str(query.from_user.id)
+    
+    # Проверяем баланс пользователя
+    balance = user_currency.get(user_id, 0)
+    if balance <= 0:
+        await query.edit_message_text(
+            "❌ У вас нет монет для отправки!\n"
+            f"Ваш баланс: {balance} монет",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Назад", callback_data='show_balance')]])
+        )
+        return
+    
+    # Устанавливаем состояние ожидания ID пользователя
+    context.user_data['awaiting_transfer_user_id'] = True
+    
+    await query.edit_message_text(
+        "💸 Отправка денег другому пользователю\n\n"
+        "Введите ID пользователя, которому хотите отправить деньги:",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Отмена", callback_data='show_balance')]])
+    )
 
 if __name__ == "__main__":
     # Проверяем, не запущен ли уже бот

@@ -289,19 +289,26 @@ def use_item(user_id: str, item_id: str, user_items, save_user_data, user_curren
 def save_shop_items(SHOP_ITEMS):
     """Сохранить настройки магазина"""
     try:
-        with open('shop_items.json', 'w', encoding='utf-8') as f:
+        shop_file = os.path.join(os.environ.get('RAILWAY_VOLUME_MOUNT_PATH', ''), 'shop_items.json')
+        # Создаем директорию, если она не существует
+        os.makedirs(os.path.dirname(shop_file) or '.', exist_ok=True)
+        
+        with open(shop_file, 'w', encoding='utf-8') as f:
             json.dump(SHOP_ITEMS, f, ensure_ascii=False, indent=4)
-        logger.info("Настройки магазина успешно сохранены")
+        logger.info(f"Настройки магазина успешно сохранены в {shop_file}")
     except Exception as e:
         logger.error(f"Ошибка при сохранении настроек магазина: {str(e)}")
 
 def load_shop_items():
     """Загрузить настройки магазина"""
     try:
-        if os.path.exists('shop_items.json'):
-            with open('shop_items.json', 'r', encoding='utf-8') as f:
-                return json.load(f)
-            logger.info("Настройки магазина успешно загружены")
+        shop_file = os.path.join(os.environ.get('RAILWAY_VOLUME_MOUNT_PATH', ''), 'shop_items.json')
+        if os.path.exists(shop_file):
+            with open(shop_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                logger.info(f"Настройки магазина успешно загружены из {shop_file}")
+                return data
+        logger.info(f"Файл настроек магазина не найден по пути: {shop_file}")
         return None
     except Exception as e:
         logger.error(f"Ошибка при загрузке настроек магазина: {str(e)}")
