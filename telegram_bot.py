@@ -18,56 +18,83 @@ import time
 # Применяем патч для вложенных циклов событий
 nest_asyncio.apply()
 
-# Проверка на уже запущенный экземпляр
-LOCK_FILE = "bot.lock"
+# В начале файла, после импортов
+def get_lock_file_path():
+    """Получение пути к файлу блокировки"""
+    if os.environ.get('RAILWAY_VOLUME_MOUNT_PATH'):
+        return os.path.join(os.environ.get('RAILWAY_VOLUME_MOUNT_PATH', ''), "bot.lock")
+    return "bot.lock"
+
+LOCK_FILE = get_lock_file_path()
 
 def check_running():
+    """Проверка, запущен ли уже бот"""
     if os.path.exists(LOCK_FILE):
         try:
             with open(LOCK_FILE, 'r') as f:
-                pid = int(f.read().strip())
-            # Проверяем, существует ли процесс с таким PID
-            os.kill(pid, 0)
-            # Если процесс существует, проверяем, не является ли он текущим процессом
-            if pid == os.getpid():
-                return False
-            return True
-        except (OSError, ValueError):
-            # Если процесс не существует или файл поврежден
+                stored_data = f.read().strip().split(':')
+                if len(stored_data) != 2:
+                    logger.warning("Некорректный формат файла блокировки")
+                    os.remove(LOCK_FILE)
+                    return False
+                
+                pid, start_time = map(int, stored_data)
+                
+                # Проверяем, существует ли процесс с таким PID
+                try:
+                    os.kill(pid, 0)
+                    # Если процесс существует и это не текущий процесс
+                    if pid != os.getpid():
+                        # Проверяем время запуска
+                        current_time = int(time.time())
+                        # Если процесс работает больше 2 часов, считаем его зависшим
+                        if current_time - start_time > 7200:  # 2 часа
+                            logger.warning(f"Обнаружен зависший процесс (PID: {pid}), удаляем блокировку")
+                            os.remove(LOCK_FILE)
+                            return False
+                        return True
+                except OSError:
+                    # Процесс не существует
+                    logger.info(f"Найден файл блокировки от несуществующего процесса (PID: {pid}), удаляем")
+                    os.remove(LOCK_FILE)
+                    return False
+        except Exception as e:
+            logger.error(f"Ошибка при проверке файла блокировки: {str(e)}")
             try:
                 os.remove(LOCK_FILE)
             except OSError:
-                logger.warning("Не удалось удалить поврежденный файл блокировки")
+                pass
     return False
 
 def create_lock():
-    # Проверяем, существует ли файл блокировки
-    if os.path.exists(LOCK_FILE):
-        try:
-            # Пытаемся удалить существующий файл блокировки
-            os.remove(LOCK_FILE)
-        except OSError:
-            logger.warning("Не удалось удалить существующий файл блокировки")
-    
-    # Создаем новый файл блокировки
+    """Создание файла блокировки"""
     try:
+        # Создаем директорию, если она не существует
+        os.makedirs(os.path.dirname(LOCK_FILE) or '.', exist_ok=True)
+        
+        # Записываем PID и время запуска
         with open(LOCK_FILE, 'w') as f:
-            f.write(str(os.getpid()))
-            logger.info(f"Создан файл блокировки для процесса {os.getpid()}")
+            f.write(f"{os.getpid()}:{int(time.time())}")
+        logger.info(f"Создан файл блокировки для процесса {os.getpid()}")
+        return True
     except Exception as e:
         logger.error(f"Ошибка при создании файла блокировки: {str(e)}")
+        return False
 
 def remove_lock():
+    """Удаление файла блокировки"""
     if os.path.exists(LOCK_FILE):
         try:
             # Проверяем, принадлежит ли файл блокировки текущему процессу
             with open(LOCK_FILE, 'r') as f:
-                pid = int(f.read().strip())
-            if pid == os.getpid():
-                os.remove(LOCK_FILE)
-                logger.info(f"Удален файл блокировки для процесса {os.getpid()}")
-        except (OSError, ValueError) as e:
-            logger.warning(f"Ошибка при удалении файла блокировки: {str(e)}")
+                stored_data = f.read().strip().split(':')
+                if len(stored_data) == 2:
+                    pid = int(stored_data[0])
+                    if pid == os.getpid():
+                        os.remove(LOCK_FILE)
+                        logger.info(f"Удален файл блокировки для процесса {os.getpid()}")
+        except Exception as e:
+            logger.error(f"Ошибка при удалении файла блокировки: {str(e)}")
 
 # Регистрируем функцию удаления файла блокировки при выходе
 atexit.register(remove_lock)
@@ -3026,82 +3053,43 @@ async def run_bot():
     """Запуск бота"""
     global application
     
+    # Проверяем, не запущен ли уже бот
+    if check_running():
+        logger.error("Бот уже запущен в другом процессе")
+        return
+    
+    # Создаем файл блокировки
+    if not create_lock():
+        logger.error("Не удалось создать файл блокировки")
+        return
+    
     try:
-        # Проверяем, не запущен ли уже бот
-        if check_running():
-            logger.error("Бот уже запущен! Завершение работы...")
-            return
-        
-        # Создаем файл блокировки
-        create_lock()
-        
+        # Загружаем конфигурацию
         config = load_config()
-        if not config["bot_token"]:
-            logger.error("Токен бота не настроен!")
-            return
-            
+        
+        # Создаем и настраиваем бота
         application = Application.builder().token(config["bot_token"]).build()
         
-        # Добавление обработчиков команд
-        application.add_handler(CommandHandler("start", start))
-        application.add_handler(CommandHandler("matches", matches_command))
-        application.add_handler(CommandHandler("settings", settings_command))
-        application.add_handler(CommandHandler("help", help_command))
-        application.add_handler(CommandHandler("predict", predict_command))
-        application.add_handler(CommandHandler("balance", balance_command))
-        application.add_handler(CommandHandler("top", top_command))
-        application.add_handler(CommandHandler("admin", admin_command))
-        application.add_handler(CommandHandler("stats", show_extended_stats))
-        application.add_handler(CommandHandler("table", show_tournament_tables))
-        application.add_handler(CommandHandler("shop", shop_command))
-        application.add_handler(CommandHandler("prognoz", prognoz_command))
+        # Регистрируем обработчики команд
+        register_handlers(application)
         
-        # Добавление обработчика кнопок
-        application.add_handler(CallbackQueryHandler(button))
-        
-        # Обновленный обработчик текстовых сообщений
-        application.add_handler(MessageHandler(
-            filters.TEXT & ~filters.COMMAND,
-            handle_text_input
-        ))
-        
-        # Настройка проверки голов каждые 3 секунды
+        # Запускаем периодические задачи
         job_queue = application.job_queue
-        job_queue.run_repeating(lambda context: check_and_send_goal_alerts(asyncio.run(fetch_matches()), context), interval=3)
+        job_queue.run_repeating(check_matches, interval=30)
+        job_queue.run_repeating(lambda ctx: save_data_periodically(), interval=300)
+        job_queue.run_repeating(check_items_expiry, interval=3600)
         
-        # Настройка проверки предстоящих матчей каждые 30 секунд
-        job_queue.run_repeating(check_and_send_match_reminders, interval=30)
+        logger.info("Бот успешно запущен")
         
-        # Сохранение данных каждые 2 минуты
-        job_queue.run_repeating(lambda context: save_data_periodically(), interval=120)
-        
-        # Проверка срока действия ролей каждый час
-        job_queue.run_repeating(check_roles_periodically, interval=3600)
-        
-        logger.info("Бот запущен и готов к работе!")
-        
-        # Настраиваем обработку сигналов для корректного завершения
-        def signal_handler(sig, frame):
-            logger.info("Получен сигнал завершения работы...")
-            if application:
-                asyncio.create_task(application.stop())
-            remove_lock()
-            
-        signal.signal(signal.SIGINT, signal_handler)
-        signal.signal(signal.SIGTERM, signal_handler)
-        
-        # Запускаем бота с настройками для предотвращения конфликтов getUpdates
-        await application.run_polling(
-            allowed_updates=Update.ALL_TYPES,
-            drop_pending_updates=True,  # Игнорировать накопившиеся обновления
-            close_loop=False  # Не закрывать цикл событий автоматически
-        )
-        
+        # Запускаем бота
+        await application.run_polling(allowed_updates=Update.ALL_TYPES)
     except Exception as e:
         logger.error(f"Ошибка при запуске бота: {str(e)}")
     finally:
         # Удаляем файл блокировки при завершении
         remove_lock()
+        if application:
+            await application.shutdown()
 
 async def shop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /shop"""
@@ -3720,6 +3708,33 @@ def get_match_status_text(status):
         'CANCELED': 'Отменен'
     }
     return status_map.get(status, status)
+
+def register_handlers(app):
+    """Регистрация всех обработчиков команд"""
+    # Команды
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("matches", matches_command))
+    app.add_handler(CommandHandler("settings", settings_command))
+    app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CommandHandler("predict", predict_command))
+    app.add_handler(CommandHandler("balance", balance_command))
+    app.add_handler(CommandHandler("top", top_command))
+    app.add_handler(CommandHandler("admin", admin_command))
+    app.add_handler(CommandHandler("stats", show_extended_stats))
+    app.add_handler(CommandHandler("table", show_tournament_tables))
+    app.add_handler(CommandHandler("shop", shop_command))
+    app.add_handler(CommandHandler("prognoz", prognoz_command))
+    
+    # Обработчик кнопок
+    app.add_handler(CallbackQueryHandler(button))
+    
+    # Обработчик текстовых сообщений
+    app.add_handler(MessageHandler(
+        filters.TEXT & ~filters.COMMAND,
+        handle_text_input
+    ))
+    
+    logger.info("Все обработчики команд успешно зарегистрированы")
 
 if __name__ == "__main__":
     try:
