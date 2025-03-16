@@ -864,7 +864,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         save_user_data(user_currency, user_predictions, user_names, user_items, user_statuses, user_nicknames, user_roles)
             
             if not role_expired:
-            keyboard.append([InlineKeyboardButton("🔐 Админ-панель", callback_data='admin_panel')])
+                keyboard.append([InlineKeyboardButton("🔐 Админ-панель", callback_data='admin_panel')])
         
         reply_markup = InlineKeyboardMarkup(keyboard)
         
@@ -2129,7 +2129,7 @@ async def handle_admin_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 else:
                     has_access = True
             else:
-            has_access = True
+                has_access = True
     
     if not has_access:
         return
@@ -3372,7 +3372,7 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 else:
                     has_access = True
             else:
-            has_access = True
+                has_access = True
     
     if not has_access:
         await query.answer("❌ У вас нет доступа к панели администратора!")
