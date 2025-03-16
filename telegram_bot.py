@@ -382,6 +382,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton("⚽️ Матчи", callback_data='today_matches'),
          InlineKeyboardButton("🎯 Прогнозы", callback_data='show_predictions')],
+        [InlineKeyboardButton("📊 Прогнозы матчей", callback_data='upcoming_matches')],
         [InlineKeyboardButton("💰 Баланс", callback_data='show_balance'),
          InlineKeyboardButton("🏆 Топ игроков", callback_data='show_top')],
         [InlineKeyboardButton("🏪 Магазин", callback_data='show_shop'),
@@ -492,6 +493,13 @@ async def fetch_matches():
                     matches = data.get('matches', [])
                     logger.info(f"Получено {len(matches)} матчей из API")
                     
+                    # Логируем все матчи для отладки
+                    for match in matches:
+                        home_team = match['homeTeam'].get('name', '')
+                        away_team = match['awayTeam'].get('name', '')
+                        match_date = match['utcDate']
+                        logger.info(f"API вернул матч: {home_team} vs {away_team} ({match_date})")
+                    
                     formatted_matches = []
                     uz_timezone = pytz.timezone('Asia/Tashkent')
                     
@@ -499,6 +507,9 @@ async def fetch_matches():
                         try:
                             home_team = normalize_team_name(match['homeTeam'].get('name', ''))
                             away_team = normalize_team_name(match['awayTeam'].get('name', ''))
+                            
+                            # Логируем нормализованные названия команд
+                            logger.info(f"Нормализованные названия: {home_team} vs {away_team}")
                             
                             # Фильтруем только матчи избранных команд
                             if home_team in FAVORITE_TEAMS or away_team in FAVORITE_TEAMS:
@@ -536,6 +547,9 @@ async def fetch_matches():
                                 }
                                 
                                 formatted_matches.append(formatted_match)
+                                logger.info(f"Добавлен матч: {home_team} vs {away_team} ({uz_time.strftime('%d.%m.%Y %H:%M')})")
+                            else:
+                                logger.info(f"Матч не добавлен (не избранная команда): {home_team} vs {away_team}")
                         
                         except Exception as e:
                             logger.error(f"Ошибка форматирования матча: {str(e)}")
@@ -555,6 +569,7 @@ async def fetch_matches():
                     return formatted_matches
                 else:
                     logger.error(f"Ошибка API: {response.status}")
+                    logger.error(f"Ответ API: {await response.text()}")
                     return matches_cache['data'] if matches_cache['data'] else []
             
     except Exception as e:
@@ -3663,5 +3678,7 @@ if __name__ == "__main__":
     finally:
         # Удаляем файл блокировки при завершении
         remove_lock()
+        logger.info("Бот остановлен")
+        logger.info("Бот остановлен")
         logger.info("Бот остановлен")
         logger.info("Бот остановлен")
