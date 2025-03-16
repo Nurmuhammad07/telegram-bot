@@ -88,6 +88,45 @@ async def process_purchase(query: CallbackQuery, item_id: str, SHOP_ITEMS, user_
     item = SHOP_ITEMS[item_id]
     user_balance = user_currency.get(user_id, 1000)
     
+    # Проверка логики покупки ролей
+    if item_id.startswith('role_') and 'role' in item:
+        current_role = user_roles.get(user_id, 'user')
+        target_role = item['role']
+        
+        # Проверяем, может ли пользователь купить эту роль
+        can_buy = False
+        
+        # Если у пользователя уже есть роль admin, он не может купить другие роли
+        if current_role == 'admin':
+            await query.answer("❌ У вас уже есть роль Admin, которая выше других ролей!")
+            return
+        
+        # Если у пользователя роль moderator, он может купить только admin
+        elif current_role == 'moderator':
+            if target_role == 'admin':
+                can_buy = True
+            elif target_role == 'operator':
+                await query.answer("❌ Ваша текущая роль Moderator выше роли Operator!")
+                return
+            elif target_role == 'moderator':
+                await query.answer("❌ У вас уже есть эта роль!")
+                return
+        
+        # Если у пользователя роль operator, он может купить только admin и moderator
+        elif current_role == 'operator':
+            if target_role in ['admin', 'moderator']:
+                can_buy = True
+            elif target_role == 'operator':
+                await query.answer("❌ У вас уже есть эта роль!")
+                return
+        
+        # Обычный пользователь может купить любую роль
+        else:
+            can_buy = True
+        
+        if not can_buy:
+            return
+    
     if user_balance < item['price']:
         # Отправляем всплывающее уведомление
         await query.answer(f"❌ Недостаточно монет!")
