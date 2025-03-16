@@ -53,7 +53,7 @@ def create_lock():
     try:
         with open(LOCK_FILE, 'w') as f:
             f.write(str(os.getpid()))
-        logger.info(f"Создан файл блокировки для процесса {os.getpid()}")
+            logger.info(f"Создан файл блокировки для процесса {os.getpid()}")
     except Exception as e:
         logger.error(f"Ошибка при создании файла блокировки: {str(e)}")
 
@@ -288,9 +288,35 @@ PREDICTIONS_FILE = os.path.join(os.environ.get('RAILWAY_VOLUME_MOUNT_PATH', ''),
 
 def load_user_data():
     """Загрузка данных пользователей из файла"""
+    # Сначала пробуем загрузить из Railway volume
+    railway_file = os.path.join(os.environ.get('RAILWAY_VOLUME_MOUNT_PATH', ''), "user_data.json")
+    local_file = "user_data.json"
+    
+    # Пробуем загрузить из Railway volume
+    if os.environ.get('RAILWAY_VOLUME_MOUNT_PATH'):
+        try:
+            with open(railway_file, 'r') as f:
+                data = json.load(f)
+                logger.info(f"Данные успешно загружены из Railway volume: {railway_file}")
+                return (
+                    data.get('user_currency', {}),
+                    data.get('user_predictions', {}),
+                    data.get('user_names', {}),
+                    data.get('user_items', {}),
+                    data.get('user_statuses', {}),
+                    data.get('user_nicknames', {}),
+                    data.get('user_roles', {})
+                )
+        except FileNotFoundError:
+            logger.info(f"Файл в Railway volume не найден: {railway_file}")
+        except Exception as e:
+            logger.error(f"Ошибка при загрузке из Railway volume: {str(e)}")
+    
+    # Если не удалось загрузить из Railway volume, пробуем локальный файл
     try:
-        with open(USER_DATA_FILE, 'r') as f:
+        with open(local_file, 'r') as f:
             data = json.load(f)
+            logger.info(f"Данные загружены из локального файла: {local_file}")
             return (
                 data.get('user_currency', {}),
                 data.get('user_predictions', {}),
@@ -301,10 +327,10 @@ def load_user_data():
                 data.get('user_roles', {})
             )
     except FileNotFoundError:
-        logger.info(f"Файл данных пользователей не найден по пути: {USER_DATA_FILE}. Создаем новый.")
+        logger.info(f"Локальный файл данных не найден: {local_file}")
         return {}, {}, {}, {}, {}, {}, {}
     except Exception as e:
-        logger.error(f"Ошибка при загрузке данных пользователей: {str(e)}")
+        logger.error(f"Ошибка при загрузке из локального файла: {str(e)}")
         return {}, {}, {}, {}, {}, {}, {}
 
 def save_user_data(currency_data, predictions_data, names_data, items_data, statuses_data, nicknames_data, roles_data):
@@ -318,15 +344,24 @@ def save_user_data(currency_data, predictions_data, names_data, items_data, stat
         'user_nicknames': nicknames_data,
         'user_roles': roles_data
     }
+
+    # Определяем путь для сохранения
+    if os.environ.get('RAILWAY_VOLUME_MOUNT_PATH'):
+        save_path = os.path.join(os.environ.get('RAILWAY_VOLUME_MOUNT_PATH', ''), "user_data.json")
+        logger.info("Сохранение данных в Railway volume")
+    else:
+        save_path = "user_data.json"
+        logger.info("Сохранение данных в локальный файл")
+
     try:
         # Создаем директорию, если она не существует
-        os.makedirs(os.path.dirname(USER_DATA_FILE) or '.', exist_ok=True)
+        os.makedirs(os.path.dirname(save_path) or '.', exist_ok=True)
         
-        with open(USER_DATA_FILE, 'w') as f:
+        with open(save_path, 'w') as f:
             json.dump(data, f, indent=4)
-            logger.info(f"Данные пользователей успешно сохранены в {USER_DATA_FILE}")
+            logger.info(f"Данные пользователей успешно сохранены в {save_path}")
     except Exception as e:
-        logger.error(f"Ошибка при сохранении данных пользователей: {str(e)}")
+        logger.error(f"Ошибка при сохранении данных пользователей в {save_path}: {str(e)}")
 
 # Загружаем данные при запуске
 user_currency, user_predictions, user_names, user_items, user_statuses, user_nicknames, user_roles = load_user_data()

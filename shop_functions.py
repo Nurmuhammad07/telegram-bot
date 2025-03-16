@@ -287,29 +287,52 @@ def use_item(user_id: str, item_id: str, user_items, save_user_data, user_curren
     return True
 
 def save_shop_items(SHOP_ITEMS):
-    """Сохранить настройки магазина"""
+    """Сохранение настроек магазина"""
+    # Определяем путь для сохранения
+    if os.environ.get('RAILWAY_VOLUME_MOUNT_PATH'):
+        save_path = os.path.join(os.environ.get('RAILWAY_VOLUME_MOUNT_PATH', ''), "shop_items.json")
+        logger.info("Сохранение настроек магазина в Railway volume")
+    else:
+        save_path = "shop_items.json"
+        logger.info("Сохранение настроек магазина в локальный файл")
+
     try:
-        shop_file = os.path.join(os.environ.get('RAILWAY_VOLUME_MOUNT_PATH', ''), 'shop_items.json')
         # Создаем директорию, если она не существует
-        os.makedirs(os.path.dirname(shop_file) or '.', exist_ok=True)
+        os.makedirs(os.path.dirname(save_path) or '.', exist_ok=True)
         
-        with open(shop_file, 'w', encoding='utf-8') as f:
-            json.dump(SHOP_ITEMS, f, ensure_ascii=False, indent=4)
-        logger.info(f"Настройки магазина успешно сохранены в {shop_file}")
+        with open(save_path, 'w') as f:
+            json.dump(SHOP_ITEMS, f, indent=4)
+            logger.info(f"Настройки магазина успешно сохранены в {save_path}")
     except Exception as e:
-        logger.error(f"Ошибка при сохранении настроек магазина: {str(e)}")
+        logger.error(f"Ошибка при сохранении настроек магазина в {save_path}: {str(e)}")
 
 def load_shop_items():
-    """Загрузить настройки магазина"""
-    try:
-        shop_file = os.path.join(os.environ.get('RAILWAY_VOLUME_MOUNT_PATH', ''), 'shop_items.json')
-        if os.path.exists(shop_file):
-            with open(shop_file, 'r', encoding='utf-8') as f:
+    """Загрузка настроек магазина"""
+    # Сначала пробуем загрузить из Railway volume
+    railway_file = os.path.join(os.environ.get('RAILWAY_VOLUME_MOUNT_PATH', ''), "shop_items.json")
+    local_file = "shop_items.json"
+    
+    # Пробуем загрузить из Railway volume
+    if os.environ.get('RAILWAY_VOLUME_MOUNT_PATH'):
+        try:
+            with open(railway_file, 'r') as f:
                 data = json.load(f)
-                logger.info(f"Настройки магазина успешно загружены из {shop_file}")
+                logger.info(f"Настройки магазина успешно загружены из Railway volume: {railway_file}")
                 return data
-        logger.info(f"Файл настроек магазина не найден по пути: {shop_file}")
-        return None
+        except FileNotFoundError:
+            logger.info(f"Файл настроек магазина в Railway volume не найден: {railway_file}")
+        except Exception as e:
+            logger.error(f"Ошибка при загрузке настроек магазина из Railway volume: {str(e)}")
+    
+    # Если не удалось загрузить из Railway volume, пробуем локальный файл
+    try:
+        with open(local_file, 'r') as f:
+            data = json.load(f)
+            logger.info(f"Настройки магазина загружены из локального файла: {local_file}")
+            return data
+    except FileNotFoundError:
+        logger.info(f"Локальный файл настроек магазина не найден: {local_file}")
+        return {}
     except Exception as e:
-        logger.error(f"Ошибка при загрузке настроек магазина: {str(e)}")
-        return None 
+        logger.error(f"Ошибка при загрузке настроек магазина из локального файла: {str(e)}")
+        return {} 
