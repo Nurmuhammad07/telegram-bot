@@ -674,7 +674,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Обработка кнопок магазина
     if query.data.startswith('buy_'):
-        await process_purchase(update, context)
+        await process_purchase_shop(update, context)
         return
     
     # Обработка кнопок предсказаний
