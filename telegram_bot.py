@@ -3075,14 +3075,30 @@ async def run_bot():
         
         # Запускаем периодические задачи
         job_queue = application.job_queue
-        job_queue.run_repeating(check_matches, interval=30)
+        
+        # Проверка голов и отправка уведомлений каждые 3 секунды
+        job_queue.run_repeating(
+            lambda ctx: check_and_send_goal_alerts(asyncio.run(fetch_matches()), ctx),
+            interval=3
+        )
+        
+        # Проверка предстоящих матчей каждые 30 секунд
+        job_queue.run_repeating(check_and_send_match_reminders, interval=30)
+        
+        # Сохранение данных каждые 5 минут
         job_queue.run_repeating(lambda ctx: save_data_periodically(), interval=300)
+        
+        # Проверка срока действия предметов и ролей каждый час
         job_queue.run_repeating(check_items_expiry, interval=3600)
+        job_queue.run_repeating(check_roles_periodically, interval=3600)
         
         logger.info("Бот успешно запущен")
         
         # Запускаем бота
-        await application.run_polling(allowed_updates=Update.ALL_TYPES)
+        await application.run_polling(
+            allowed_updates=Update.ALL_TYPES,
+            drop_pending_updates=True  # Игнорировать накопившиеся обновления
+        )
     except Exception as e:
         logger.error(f"Ошибка при запуске бота: {str(e)}")
     finally:
@@ -3735,6 +3751,46 @@ def register_handlers(app):
     ))
     
     logger.info("Все обработчики команд успешно зарегистрированы")
+
+async def check_items_expiry(context: ContextTypes.DEFAULT_TYPE):
+    """Проверка срока действия предметов"""
+    try:
+        current_time = datetime.now(pytz.UTC)
+        users_to_update = []
+        
+        for user_id, items in user_items.items():
+            items_to_remove = []
+            for item_id, expiry in items.items():
+                # Пропускаем служебные поля
+                if item_id in ['awaiting_nickname', 'awaiting_status', 'role_expiry']:
+                    continue
+                
+                # Если это количество использований
+                if isinstance(expiry, int):
+                    if expiry <= 0:
+                        items_to_remove.append(item_id)
+                # Если это дата истечения
+                elif isinstance(expiry, str):
+                    try:
+                        expiry_date = datetime.fromisoformat(expiry)
+                        if current_time > expiry_date:
+                            items_to_remove.append(item_id)
+                    except (ValueError, TypeError):
+                        logger.warning(f"Некорректный формат даты истечения для предмета {item_id} пользователя {user_id}")
+            
+            # Удаляем истекшие предметы
+            if items_to_remove:
+                for item_id in items_to_remove:
+                    del user_items[user_id][item_id]
+                users_to_update.append(user_id)
+        
+        # Сохраняем изменения, если были удалены предметы
+        if users_to_update:
+            save_user_data(user_currency, user_predictions, user_names, user_items, user_statuses, user_nicknames, user_roles)
+            logger.info(f"Удалены истекшие предметы у {len(users_to_update)} пользователей")
+    
+    except Exception as e:
+        logger.error(f"Ошибка при проверке срока действия предметов: {str(e)}")
 
 if __name__ == "__main__":
     try:
