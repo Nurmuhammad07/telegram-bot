@@ -3064,7 +3064,7 @@ async def show_tournament_tables(update: Update, context: ContextTypes.DEFAULT_T
 
 async def run_bot():
     """Запуск бота"""
-    global application
+    global application, shutdown_event
     
     # Проверяем, не запущен ли уже бот
     if check_running():
@@ -3076,12 +3076,25 @@ async def run_bot():
         logger.error("Не удалось создать файл блокировки")
         return
     
+    # Создаем событие для сигнализации о завершении
+    shutdown_event = asyncio.Event()
+    
+    # Настраиваем обработчики сигналов
+    def signal_handler(sig, frame):
+        logger.info(f"Получен сигнал завершения: {sig}")
+        if not shutdown_event.is_set():
+            shutdown_event.set()
+    
+    # Регистрируем обработчики сигналов
+    for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGABRT):
+        signal.signal(sig, signal_handler)
+    
     try:
         # Загружаем конфигурацию
         config = load_config()
         
-        # Создаем и настраиваем бота
-        application = Application.builder().token(config["bot_token"]).build()
+        # Создаем и настраиваем бота с дополнительными параметрами для предотвращения конфликтов
+        application = Application.builder().token(config["bot_token"]).get_updates_request_timeout(30).build()
         
         # Регистрируем обработчики команд
         register_handlers(application)
@@ -3110,10 +3123,15 @@ async def run_bot():
         
         logger.info("Бот успешно запущен")
         
-        # Запускаем бота
+        # Запускаем бота с дополнительными параметрами для предотвращения конфликтов
         await application.run_polling(
             allowed_updates=Update.ALL_TYPES,
-            drop_pending_updates=True  # Игнорировать накопившиеся обновления
+            drop_pending_updates=True,  # Игнорировать накопившиеся обновления
+            pool_timeout=30.0,  # Увеличиваем таймаут для пула соединений
+            read_timeout=30.0,  # Увеличиваем таймаут чтения
+            connect_timeout=30.0,  # Увеличиваем таймаут соединения
+            close_loop=False,  # Не закрывать цикл событий автоматически
+            stop_signals=None  # Отключаем встроенную обработку сигналов, используем свою
         )
     except Exception as e:
         logger.error(f"Ошибка при запуске бота: {str(e)}")
@@ -3121,7 +3139,13 @@ async def run_bot():
         # Удаляем файл блокировки при завершении
         remove_lock()
         if application:
-            await application.shutdown()
+            try:
+                await application.shutdown()
+                logger.info("Бот корректно остановлен")
+            except Exception as e:
+                logger.error(f"Ошибка при остановке бота: {str(e)}")
+        
+        logger.info("Бот остановлен")
 
 async def shop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /shop"""
@@ -3944,13 +3968,19 @@ async def stream_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 if __name__ == "__main__":
     try:
-        # Проверка на запущенный экземпляр перенесена в run_bot()
+        # Настраиваем логирование
+        logging.basicConfig(
+            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+            level=logging.INFO
+        )
+        
+        # Запускаем бота
         asyncio.run(run_bot())
     except KeyboardInterrupt:
-        logger.info("Получен сигнал завершения работы...")
+        logger.info("Бот остановлен пользователем")
     except Exception as e:
         logger.error(f"Критическая ошибка: {str(e)}")
     finally:
-        # Удаляем файл блокировки при завершении
+        # Гарантированно удаляем файл блокировки
         remove_lock()
         logger.info("Бот остановлен")
