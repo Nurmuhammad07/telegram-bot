@@ -2039,7 +2039,8 @@ async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_admin_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработка ввода для админ-панели"""
-    user_id = str(update.effective_user.id)
+    user_id = str(update.message.from_user.id)
+    admin_state = context.user_data.get('admin_state', '')
     
     # Проверяем, имеет ли пользователь доступ к админ-панели
     has_access = False
@@ -2055,8 +2056,6 @@ async def handle_admin_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     if not has_access:
         return
-    
-    admin_state = context.user_data.get('admin_state')
     
     if admin_state == 'waiting_user_id':
         # Проверяем, имеет ли пользователь доступ к изменению баланса
@@ -2169,7 +2168,13 @@ async def handle_admin_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
             
         target_user_id = update.message.text
         
-        if target_user_id not in user_currency:
+        # Проверяем, существует ли пользователь в любом из словарей данных
+        user_exists = (target_user_id in user_names or 
+                       target_user_id in user_currency or 
+                       target_user_id in user_nicknames or
+                       target_user_id in user_predictions)
+        
+        if not user_exists:
             await update.message.reply_text(
                 "❌ Пользователь не найден!\n"
                 "Попробуйте снова или нажмите /admin для возврата в панель администратора."
@@ -2187,8 +2192,11 @@ async def handle_admin_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
         keyboard.append([InlineKeyboardButton("🔙 Отмена", callback_data='admin_panel')])
         reply_markup = InlineKeyboardMarkup(keyboard)
         
+        # Получаем имя пользователя из доступных словарей
+        user_name = user_names.get(target_user_id) or user_nicknames.get(target_user_id) or f"User{target_user_id}"
+        
         await update.message.reply_text(
-            f"👤 Пользователь: {target_user_id}\n\n"
+            f"👤 Пользователь: {user_name} (ID: {target_user_id})\n\n"
             "Выберите предмет для добавления:",
             reply_markup=reply_markup
         )
@@ -2438,7 +2446,14 @@ async def admin_manage_items(query, context):
 async def admin_add_item(query, context, item_id):
     """Добавить предмет пользователю"""
     target_user_id = context.user_data.get('target_user_id')
-    if not target_user_id or target_user_id not in user_currency:
+    
+    # Проверяем, существует ли пользователь в любом из словарей данных
+    user_exists = (target_user_id in user_names or 
+                   target_user_id in user_currency or 
+                   target_user_id in user_nicknames or
+                   target_user_id in user_predictions)
+    
+    if not user_exists:
         await query.answer("❌ Пользователь не найден!")
         return
     
@@ -2466,21 +2481,29 @@ async def admin_add_item(query, context, item_id):
     # Сохраняем изменения
     save_user_data(user_currency, user_predictions, user_names, user_items, user_statuses, user_nicknames, user_roles)
     
+    # Определяем роль и имя администратора
+    admin_id = str(query.from_user.id)
+    admin_role = "Developer" if admin_id == ADMIN_ID else user_roles.get(admin_id, "Администратор")
+    admin_name = user_names.get(admin_id) or user_nicknames.get(admin_id) or "Администратор"
+    
     # Отправляем уведомление пользователю
     try:
         await context.bot.send_message(
             chat_id=target_user_id,
-            text=f"🎁 Администратор добавил вам предмет: {item['name']}!"
+            text=f"🎁 {admin_name} ({admin_role}) добавил вам предмет: {item['name']}!"
         )
     except Exception as e:
         logger.error(f"Ошибка отправки уведомления пользователю: {str(e)}")
+    
+    # Получаем имя пользователя из доступных словарей
+    user_name = user_names.get(target_user_id) or user_nicknames.get(target_user_id) or f"User{target_user_id}"
     
     # Очищаем состояние
     context.user_data.pop('admin_state', None)
     context.user_data.pop('target_user_id', None)
     
     await query.edit_message_text(
-        f"✅ Предмет {item['name']} успешно добавлен пользователю {target_user_id}!",
+        f"✅ Предмет {item['name']} успешно добавлен пользователю {user_name} (ID: {target_user_id})!",
         reply_markup=InlineKeyboardMarkup([[
             InlineKeyboardButton("🔙 Назад к админ-панели", callback_data='admin_panel')
         ]])
@@ -2582,8 +2605,13 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif 'awaiting_user_id_for_role' in context.user_data:
         target_user_id = update.message.text.strip()
         
-        # Проверяем, существует ли пользователь
-        if target_user_id not in user_names:
+        # Проверяем, существует ли пользователь в любом из словарей данных
+        user_exists = (target_user_id in user_names or 
+                       target_user_id in user_currency or 
+                       target_user_id in user_nicknames or
+                       target_user_id in user_predictions)
+        
+        if not user_exists:
             await update.message.reply_text("❌ Пользователь с таким ID не найден!")
             context.user_data.pop('awaiting_user_id_for_role', None)
             return True
@@ -2601,8 +2629,11 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("🔙 Назад", callback_data="admin_manage_roles")]
         ]
         
+        # Получаем имя пользователя из доступных словарей
+        user_name = user_names.get(target_user_id) or user_nicknames.get(target_user_id) or f"User{target_user_id}"
+        
         await update.message.reply_text(
-            f"Выберите роль для пользователя {user_names.get(target_user_id, target_user_id)}:",
+            f"Выберите роль для пользователя {user_name}:",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
         return True
@@ -2611,8 +2642,13 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif 'awaiting_user_id_for_role_removal' in context.user_data:
         target_user_id = update.message.text.strip()
         
-        # Проверяем, существует ли пользователь
-        if target_user_id not in user_names:
+        # Проверяем, существует ли пользователь в любом из словарей данных
+        user_exists = (target_user_id in user_names or 
+                       target_user_id in user_currency or 
+                       target_user_id in user_nicknames or
+                       target_user_id in user_predictions)
+        
+        if not user_exists:
             await update.message.reply_text("❌ Пользователь с таким ID не найден!")
             context.user_data.pop('awaiting_user_id_for_role_removal', None)
             return True
@@ -2624,19 +2660,19 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return True
         
         # Проверяем, не пытается ли админ удалить роль developer
-        user_id = str(update.effective_user.id)
-        if user_roles[target_user_id] == 'developer' and user_id != ADMIN_ID:
+        if user_roles[target_user_id] == 'developer' and str(update.message.from_user.id) != ADMIN_ID:
             await update.message.reply_text("❌ Вы не можете удалить роль Developer!")
             context.user_data.pop('awaiting_user_id_for_role_removal', None)
             return True
         
-        # Удаляем роль пользователя
-        current_role = user_roles.pop(target_user_id, None)
+        # Получаем имя пользователя из доступных словарей
+        user_name = user_names.get(target_user_id) or user_nicknames.get(target_user_id) or f"User{target_user_id}"
+        
+        # Удаляем роль
+        role_name = user_roles.pop(target_user_id)
         save_user_data(user_currency, user_predictions, user_names, user_items, user_statuses, user_nicknames, user_roles)
         
-        await update.message.reply_text(
-            f"✅ Роль {current_role} успешно удалена у пользователя {user_names.get(target_user_id, target_user_id)}!"
-        )
+        await update.message.reply_text(f"✅ Роль {role_name} успешно удалена у пользователя {user_name}!")
         
         # Возвращаемся в меню управления ролями
         keyboard = [
