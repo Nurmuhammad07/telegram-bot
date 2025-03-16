@@ -880,8 +880,8 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Для VIP пользователей - все текущие матчи
             available_matches = [m for m in matches if m['status'] in ['SCHEDULED', 'LIVE', 'IN_PLAY', 'PAUSED']]
         else:
-            # Для обычных пользователей - только запланированные матчи
-            available_matches = [m for m in matches if m['status'] == 'SCHEDULED']
+            # Для обычных пользователей - только предстоящие матчи (не LIVE, не IN_PLAY, не PAUSED, не FINISHED)
+            available_matches = [m for m in matches if m['status'] not in ['LIVE', 'IN_PLAY', 'PAUSED', 'FINISHED']]
         
         if not available_matches:
             await query.edit_message_text(
@@ -1761,8 +1761,8 @@ async def predict_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Для VIP пользователей - все текущие матчи
         available_matches = [m for m in matches if m['status'] in ['SCHEDULED', 'LIVE', 'IN_PLAY', 'PAUSED']]
     else:
-        # Для обычных пользователей - только запланированные матчи
-        available_matches = [m for m in matches if m['status'] == 'SCHEDULED']
+        # Для обычных пользователей - только предстоящие матчи (не LIVE, не IN_PLAY, не PAUSED, не FINISHED)
+        available_matches = [m for m in matches if m['status'] not in ['LIVE', 'IN_PLAY', 'PAUSED', 'FINISHED']]
     
     if not available_matches:
         await update.message.reply_text("❌ Сейчас нет доступных матчей для прогноза!")
