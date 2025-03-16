@@ -1915,8 +1915,10 @@ async def process_prediction(update: Update, context: ContextTypes.DEFAULT_TYPE)
         f"• Точный счёт: {exact_reward} монет\n"
         f"• Правильная разница голов: {diff_reward} монет\n"
         f"• Правильный исход: {outcome_reward} монет{boosters_text}{stats_text}{odds_text}\n\n"
-        "Введите ваш прогноз в формате 'X-Y', где X - голы домашней команды, Y - голы гостевой команды.\n"
-        "Например: 2-1"
+        f"Введите ваш прогноз в формате 'X-Y', где:\n"
+        f"X - количество голов команды {home_team}\n"
+        f"Y - количество голов команды {away_team}\n"
+        f"Например: 2-1"
     )
 
 async def handle_prediction_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1928,8 +1930,10 @@ async def handle_prediction_input(update: Update, context: ContextTypes.DEFAULT_
     if not re.match(r'^\d+-\d+$', prediction_text):
         await update.message.reply_text(
             "❌ Неверный формат прогноза!\n"
-            "Введите прогноз в формате 'X-Y', где X и Y - целые числа.\n"
-            "Например: 2-1"
+            f"Введите прогноз в формате 'X-Y', где:\n"
+            f"X - количество голов команды {home_team}\n"
+            f"Y - количество голов команды {away_team}\n"
+            f"Например: 2-1"
         )
         return
     
