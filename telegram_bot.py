@@ -76,7 +76,7 @@ def create_lock():
         with open(LOCK_FILE, 'w') as f:
             f.write(f"{os.getpid()}:{int(time.time())}")
             logger.info(f"Создан файл блокировки для процесса {os.getpid()}")
-        return True
+            return True
     except Exception as e:
         logger.error(f"Ошибка при создании файла блокировки: {str(e)}")
         return False
@@ -3070,7 +3070,7 @@ async def run_bot():
     if check_running():
         logger.error("Бот уже запущен в другом процессе")
         return
-    
+            
     # Создаем файл блокировки
     if not create_lock():
         logger.error("Не удалось создать файл блокировки")
