@@ -579,21 +579,51 @@ def get_team_id(team_name):
 # Обработка нажатий на кнопки
 async def split_long_message(text, max_length=4000):
     """Разделить длинное сообщение на части"""
+    # Если сообщение короче максимальной длины, возвращаем его как есть
+    if len(text) <= max_length:
+        return [text]
+    
     parts = []
-    current_part = ""
     
     # Разделяем по блокам матчей (два переноса строки)
     blocks = text.split('\n\n')
     
+    # Объединяем блоки в более крупные части
+    current_part = ""
+    
     for block in blocks:
+        # Если блок сам по себе больше максимальной длины, разбиваем его по строкам
+        if len(block) > max_length:
+            if current_part:
+                parts.append(current_part.strip())
+                current_part = ""
+            
+            # Разбиваем большой блок по строкам
+            lines = block.split('\n')
+            sub_block = ""
+            
+            for line in lines:
+                if len(sub_block + line + '\n') <= max_length:
+                    sub_block += line + '\n'
+                else:
+                    if sub_block:
+                        parts.append(sub_block.strip())
+                    sub_block = line + '\n'
+            
+            if sub_block:
+                current_part = sub_block.strip()
+        
         # Если текущая часть + новый блок не превышает лимит
-        if len(current_part + block + '\n\n') <= max_length:
-            current_part += block + '\n\n'
+        elif len(current_part + '\n\n' + block if current_part else block) <= max_length:
+            if current_part:
+                current_part += '\n\n' + block
+            else:
+                current_part = block
         else:
             # Если текущая часть не пустая, добавляем её в список частей
             if current_part:
                 parts.append(current_part.strip())
-            current_part = block + '\n\n'
+            current_part = block
     
     # Добавляем последнюю часть
     if current_part:
@@ -601,7 +631,27 @@ async def split_long_message(text, max_length=4000):
     
     return parts
 
-async def send_long_message(message, text, reply_markup=None):
+async def delete_previous_bot_messages(chat_id, bot, limit=5):
+    """Удаляет предыдущие сообщения бота в чате"""
+    try:
+        # Получаем последние сообщения в чате
+        messages = await bot.get_chat_history(chat_id=chat_id, limit=limit)
+        
+        # Фильтруем только сообщения от бота
+        bot_messages = [msg for msg in messages if msg.from_user.id == bot.id]
+        
+        # Удаляем сообщения бота (кроме последнего)
+        for msg in bot_messages[1:]:
+            try:
+                await bot.delete_message(chat_id=chat_id, message_id=msg.message_id)
+            except Exception as e:
+                logger.debug(f"Не удалось удалить сообщение: {str(e)}")
+    except Exception as e:
+        logger.debug(f"Ошибка при удалении предыдущих сообщений: {str(e)}")
+        # Игнорируем ошибки, так как эта функция не критична
+
+# Модифицируем функцию send_long_message, чтобы она удаляла предыдущие сообщения
+async def send_long_message(message, text, reply_markup=None, clean_chat=False):
     """Отправить длинное сообщение частями"""
     parts = await split_long_message(text)
     
@@ -609,13 +659,22 @@ async def send_long_message(message, text, reply_markup=None):
         # Проверяем, является ли чат группой
         chat_type = message.chat.type if hasattr(message, 'chat') else message.message.chat.type
         is_group = chat_type in ['group', 'supergroup']
+        chat_id = message.chat.id if hasattr(message, 'chat') else message.message.chat.id
+        bot = message.get_bot()
+        
+        # Если нужно очистить чат от предыдущих сообщений бота
+        if clean_chat and not is_group:
+            try:
+                await delete_previous_bot_messages(chat_id, bot)
+            except Exception as e:
+                logger.debug(f"Не удалось очистить чат: {str(e)}")
         
         # Если это группа, проверяем права бота
         if is_group:
             try:
-                bot_member = await message.get_bot().get_chat_member(
-                    chat_id=message.chat.id if hasattr(message, 'chat') else message.message.chat.id,
-                    user_id=message.get_bot().id
+                bot_member = await bot.get_chat_member(
+                    chat_id=chat_id,
+                    user_id=bot.id
                 )
                 can_send = bot_member.can_send_messages
                 can_edit = bot_member.can_edit_messages
@@ -627,41 +686,89 @@ async def send_long_message(message, text, reply_markup=None):
                 logger.error(f"Ошибка при проверке прав бота: {str(e)}")
                 return
         
+        # Если сообщение короткое (только одна часть), отправляем его целиком
+        if len(parts) == 1:
+            if hasattr(message, 'edit_message_text'):
+                try:
+                    await message.edit_message_text(
+                        text=parts[0],
+                        reply_markup=reply_markup
+                    )
+                except Exception as e:
+                    logger.error(f"Ошибка при обновлении сообщения: {str(e)}")
+                    await bot.send_message(
+                        chat_id=chat_id,
+                        text=parts[0],
+                        reply_markup=reply_markup
+                    )
+            else:
+                await message.reply_text(
+                    text=parts[0],
+                    reply_markup=reply_markup
+                )
+            return
+        
+        # Если сообщение длинное, объединяем части в одно сообщение, если возможно
+        # Максимальная длина сообщения в Telegram - 4096 символов
+        combined_parts = []
+        current_combined = ""
+        
+        for part in parts:
+            if len(current_combined) + len(part) + 2 <= 4000:  # Оставляем небольшой запас
+                if current_combined:
+                    current_combined += "\n\n" + part
+                else:
+                    current_combined = part
+            else:
+                if current_combined:
+                    combined_parts.append(current_combined)
+                current_combined = part
+        
+        if current_combined:
+            combined_parts.append(current_combined)
+        
         # Если это callback query (кнопки в сообщении)
         if hasattr(message, 'edit_message_text'):
             try:
-                # Отправляем все части, кроме последней
-                for part in parts[:-1]:
-                    await message.get_bot().send_message(
-                        chat_id=message.message.chat.id,
+                # Отправляем первую часть с обновлением текущего сообщения
+                await message.edit_message_text(
+                    text=combined_parts[0],
+                    reply_markup=None if len(combined_parts) > 1 else reply_markup
+                )
+                
+                # Отправляем остальные части, кроме последней
+                for i, part in enumerate(combined_parts[1:-1], 1):
+                    await bot.send_message(
+                        chat_id=chat_id,
                         text=part
                     )
-                # Последнюю часть отправляем с кнопками
-                await message.edit_message_text(
-                    text=parts[-1],
-                    reply_markup=reply_markup
-                )
+                
+                # Отправляем последнюю часть с кнопками, если есть больше одной части
+                if len(combined_parts) > 1:
+                    await bot.send_message(
+                        chat_id=chat_id,
+                        text=combined_parts[-1],
+                        reply_markup=reply_markup
+                    )
             except Exception as e:
                 logger.error(f"Ошибка при обновлении сообщения: {str(e)}")
-                # Пробуем отправить новое сообщение
-                await message.get_bot().send_message(
-                    chat_id=message.message.chat.id,
-                    text=parts[-1],
-                    reply_markup=reply_markup
-                )
+                # В случае ошибки отправляем все части как новые сообщения
+                for i, part in enumerate(combined_parts):
+                    await bot.send_message(
+                        chat_id=chat_id,
+                        text=part,
+                        reply_markup=reply_markup if i == len(combined_parts) - 1 else None
+                    )
         else:
             # Обычное сообщение
             try:
                 # Отправляем все части, кроме последней
-                for part in parts[:-1]:
-                    await message.get_bot().send_message(
-                        chat_id=message.chat.id,
-                        text=part
-                    )
+                for part in combined_parts[:-1]:
+                    await message.reply_text(text=part)
+                
                 # Последнюю часть отправляем с кнопками
-                await message.get_bot().send_message(
-                    chat_id=message.chat.id,
-                    text=parts[-1],
+                await message.reply_text(
+                    text=combined_parts[-1],
                     reply_markup=reply_markup
                 )
             except Exception as e:
@@ -671,7 +778,7 @@ async def send_long_message(message, text, reply_markup=None):
         # Пробуем отправить сообщение об ошибке
         try:
             chat_id = message.chat.id if hasattr(message, 'chat') else message.message.chat.id
-            await message.get_bot().send_message(
+            await bot.send_message(
                 chat_id=chat_id,
                 text="❌ Произошла ошибка при отправке сообщения. Пожалуйста, проверьте права бота в группе."
             )
@@ -786,6 +893,18 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Обработка кнопки списка пользователей с ролями
     elif query.data == 'admin_list_roles':
         await admin_list_roles(query)
+    
+    # Обработка кнопки обновления матчей
+    elif query.data == 'refresh_matches':
+        await refresh_matches(update, context)
+        return
+    
+    # Обработка кнопки сегодняшних матчей
+    elif query.data == 'today_matches':
+        # Сбрасываем кэш и перенаправляем на refresh_matches
+        matches_cache['last_update'] = None
+        await refresh_matches(update, context)
+        return
     
     # Остальные обработчики...
     elif query.data == 'back_to_main':
@@ -1223,7 +1342,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data='back_to_main')]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        await query.edit_message_text(text, reply_markup=reply_markup)
+        await send_long_message(update.message, text, reply_markup=reply_markup, clean_chat=True)
     
     elif query.data == 'show_help':
         text = "ℹ️ Помощь по использованию бота:\n\n"
@@ -1336,6 +1455,10 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send_money(query, context)
         return
     
+    elif query.data == 'refresh_matches':
+        await refresh_matches(update, context)
+        return
+    
     else:
         await query.answer()
         # Обработка остальных callback_data
@@ -1361,63 +1484,49 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def matches_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /matches"""
     matches = await fetch_matches()
-    if matches:
-        text = "📅 Матчи:\n\n"
-        
-        # Сначала показываем live матчи
-        live_matches = [m for m in matches if m['status'] in ['LIVE', 'IN_PLAY', 'PAUSED']]
-        if live_matches:
-            text += "🔴 LIVE МАТЧИ:\n\n"
-            for match in live_matches:
-                home_star = "⭐️ " if match['home'] in FAVORITE_TEAMS else ""
-                away_star = " ⭐️" if match['away'] in FAVORITE_TEAMS else ""
-                text += f"{get_match_status_emoji(match['status'])} {home_star}{match['home']} {match['score']} {away_star}{match['away']}\n"
-                text += f"🏆 {match['competition']}\n\n"
-        
-        # Показываем завершенные матчи
-        finished_matches = [m for m in matches if m['status'] == 'FINISHED']
-        if finished_matches:
-            text += "✅ ЗАВЕРШЕННЫЕ МАТЧИ:\n\n"
-            for match in finished_matches:
-                home_star = "⭐️ " if match['home'] in FAVORITE_TEAMS else ""
-                away_star = " ⭐️" if match['away'] in FAVORITE_TEAMS else ""
-                text += f"{get_match_status_emoji(match['status'])} {home_star}{match['home']} {match['score']} {away_star}{match['away']}\n"
-                text += f"🏆 {match['competition']}\n\n"
-        
-        # Затем показываем предстоящие матчи
-        scheduled_matches = [m for m in matches if m['status'] not in ['LIVE', 'IN_PLAY', 'PAUSED', 'FINISHED']]
-        if scheduled_matches:
-            text += "📆 ПРЕДСТОЯЩИЕ МАТЧИ:\n\n"
-            
-            # Группируем матчи по датам
-            matches_by_date = {}
-            for match in scheduled_matches:
-                match_date = datetime.strptime(match['date'], "%d.%m.%Y").date()
-                if match_date not in matches_by_date:
-                    matches_by_date[match_date] = []
-                matches_by_date[match_date].append(match)
-            
-            # Сортируем даты
-            sorted_dates = sorted(matches_by_date.keys())
-            
-            # Выводим матчи по датам
-            for date in sorted_dates:
-                text += f"\n📆 {date.strftime('%d.%m.%Y')}:\n"
-                for match in matches_by_date[date]:
-                    home_star = "⭐️ " if match['home'] in FAVORITE_TEAMS else ""
-                    away_star = " ⭐️" if match['away'] in FAVORITE_TEAMS else ""
-                    text += f"{get_match_status_emoji(match['status'])} {home_star}{match['home']} vs {away_star}{match['away']}\n"
-                    text += f"🕒 {match['time']} (UZB)\n"
-                    text += f"🏆 {match['competition']}\n\n"
-    else:
-        text = "Матчей с участием избранных команд не найдено"
     
-    keyboard = [[InlineKeyboardButton("🔄 Обновить", callback_data='today_matches')],
-               [InlineKeyboardButton("🔙 Главное меню", callback_data='back_to_main')]]
+    if not matches:
+        await update.message.reply_text("❌ Не удалось получить информацию о матчах.")
+        return
+    
+    text = "⚽️ Сегодняшние матчи:\n\n"
+    
+    # Группируем матчи по статусу
+    live_matches = [m for m in matches if m['status'] in ['LIVE', 'IN_PLAY', 'PAUSED']]
+    finished_matches = [m for m in matches if m['status'] == 'FINISHED']
+    scheduled_matches = [m for m in matches if m['status'] == 'SCHEDULED']
+    
+    # Сначала выводим текущие матчи
+    if live_matches:
+        text += "🔴 LIVE:\n"
+        for match in live_matches:
+            status_emoji = get_match_status_emoji(match['status'])
+            text += f"{status_emoji} {match['home']} {match['score']} {match['away']} ({match['time']})\n"
+            text += f"🏆 {match['competition']}\n\n"
+    
+    # Затем завершенные
+    if finished_matches:
+        text += "✅ Завершенные:\n"
+        for match in finished_matches:
+            status_emoji = get_match_status_emoji(match['status'])
+            text += f"{status_emoji} {match['home']} {match['score']} {match['away']}\n"
+            text += f"🏆 {match['competition']}\n\n"
+    
+    # И наконец запланированные
+    if scheduled_matches:
+        text += "⏰ Запланированные:\n"
+        for match in scheduled_matches:
+            status_emoji = get_match_status_emoji(match['status'])
+            text += f"{status_emoji} {match['home']} vs {match['away']} ({match['time']})\n"
+            text += f"🏆 {match['competition']}\n\n"
+    
+    keyboard = [
+        [InlineKeyboardButton("🔄 Обновить", callback_data='refresh_matches')],
+        [InlineKeyboardButton("🔙 Назад", callback_data='back_to_main')]
+    ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    # Отправляем сообщение частями
-    await send_long_message(update.message, text, reply_markup=reply_markup)
+    await send_long_message(update.message, text, reply_markup=reply_markup, clean_chat=True)
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /help"""
@@ -1808,7 +1917,7 @@ async def top_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data='back_to_main')]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await update.message.reply_text(text, reply_markup=reply_markup)
+    await send_long_message(update.message, text, reply_markup=reply_markup, clean_chat=True)
 
 async def process_prediction(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработка прогноза на матч"""
@@ -3033,7 +3142,7 @@ async def check_predictions(match):
     
     # Получаем финальный счет
     try:
-        final_home, final_away = map(int, match['score'].split('-'))
+        final_home, final_away = map(int, match['score'].split(' : '))
     except (ValueError, AttributeError):
         logger.error(f"Не удалось получить счет матча {match_id}")
         return
@@ -3041,6 +3150,9 @@ async def check_predictions(match):
     # Определяем, является ли матч топовым
     is_top_match = match['home'] in TOP_TEAMS and match['away'] in TOP_TEAMS
     multiplier = TOP_MATCH_MULTIPLIER if is_top_match else 1.0
+    
+    # Словарь для группировки уведомлений по пользователям
+    user_notifications = {}
     
     # Проверяем прогнозы всех пользователей
     for user_id, predictions in user_predictions.items():
@@ -3077,53 +3189,72 @@ async def check_predictions(match):
                     reward *= 2
                     reward_type += " (с двойной наградой)"
                 
+                # Инициализируем данные для уведомления пользователя
+                if user_id not in user_notifications:
+                    user_notifications[user_id] = {
+                        'total_reward': 0,
+                        'matches': []
+                    }
+                
+                match_result = {
+                    'home': match['home'],
+                    'away': match['away'],
+                    'prediction': prediction_text,
+                    'result': match['score'],
+                    'reward': reward,
+                    'reward_type': reward_type,
+                    'insurance_used': False
+                }
+                
                 if reward > 0:
                     # Выдаем награду
                     await update_user_balance(user_id, reward)
-                    
-                    # Отправляем уведомление
-                    try:
-                        await application.bot.send_message(
-                            chat_id=user_id,
-                            text=f"🎉 Ваш прогноз на матч {match['home']} vs {match['away']} принес награду!\n"
-                                 f"✅ Прогноз: {prediction_text}, Итог: {match['score']}\n"
-                                 f"🏆 Вы угадали {reward_type} и получаете {reward} монет!"
-                        )
-                    except Exception as e:
-                        logger.error(f"Ошибка отправки уведомления пользователю {user_id}: {str(e)}")
-                
+                    user_notifications[user_id]['total_reward'] += reward
                 else:
                     # Неправильный прогноз - проверяем страховку
                     if prediction_data.get('insurance', False):
                         # Возвращаем ставку
                         await update_user_balance(user_id, PREDICTION_COST)
-                        
-                        # Отправляем уведомление
-                        try:
-                            await application.bot.send_message(
-                                chat_id=user_id,
-                                text=f"🛡️ Ваш прогноз на матч {match['home']} vs {match['away']} не сбылся, но сработала страховка!\n"
-                                     f"❌ Прогноз: {prediction_text}, Итог: {match['score']}\n"
-                                     f"💰 Вам возвращено {PREDICTION_COST} монет."
-                            )
-                        except Exception as e:
-                            logger.error(f"Ошибка отправки уведомления пользователю {user_id}: {str(e)}")
-                    else:
-                        # Отправляем уведомление о проигрыше
-                        try:
-                            await application.bot.send_message(
-                                chat_id=user_id,
-                                text=f"❌ Ваш прогноз на матч {match['home']} vs {match['away']} не сбылся.\n"
-                                     f"Прогноз: {prediction_text}, Итог: {match['score']}"
-                            )
-                        except Exception as e:
-                            logger.error(f"Ошибка отправки уведомления пользователю {user_id}: {str(e)}")
+                        match_result['insurance_used'] = True
+                        match_result['reward'] = PREDICTION_COST
+                        user_notifications[user_id]['total_reward'] += PREDICTION_COST
+                
+                user_notifications[user_id]['matches'].append(match_result)
                 
                 # Удаляем проверенный прогноз
                 del user_predictions[user_id][match_id]
                 
             except (ValueError, KeyError) as e:
                 logger.error(f"Ошибка при проверке прогноза пользователя {user_id}: {str(e)}")
+    
+    # Отправляем групповые уведомления пользователям
+    for user_id, notification_data in user_notifications.items():
+        try:
+            message_text = "📊 Результаты ваших прогнозов:\n\n"
+            
+            for match_info in notification_data['matches']:
+                message_text += f"⚽️ {match_info['home']} vs {match_info['away']}\n"
+                message_text += f"🎯 Ваш прогноз: {match_info['prediction']}, Итог: {match_info['result']}\n"
+                
+                if match_info['reward'] > 0:
+                    if match_info['insurance_used']:
+                        message_text += f"🛡️ Сработала страховка! Возвращено {match_info['reward']} монет\n"
+                    else:
+                        message_text += f"🏆 Вы угадали {match_info['reward_type']} и получаете {match_info['reward']} монет!\n"
+                else:
+                    message_text += "❌ Прогноз не сбылся\n"
+                
+                message_text += "\n"
+            
+            if notification_data['total_reward'] > 0:
+                message_text += f"💰 Итого получено: {notification_data['total_reward']} монет"
+            
+            await application.bot.send_message(
+                chat_id=user_id,
+                text=message_text
+            )
+        except Exception as e:
+            logger.error(f"Ошибка отправки уведомления пользователю {user_id}: {str(e)}")
     
     # Сохраняем обновленные данные
     save_user_data(user_currency, user_predictions, user_names, user_items, user_statuses, user_nicknames, user_roles)
@@ -3375,6 +3506,60 @@ async def send_money(query, context):
         "Введите ID пользователя, которому хотите отправить деньги:",
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Отмена", callback_data='show_balance')]])
     )
+
+async def refresh_matches(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обновление списка матчей"""
+    query = update.callback_query
+    await query.answer()
+    
+    # Сбрасываем кэш
+    matches_cache['last_update'] = None
+    
+    # Получаем обновленные данные
+    matches = await fetch_matches()
+    
+    if not matches:
+        await query.edit_message_text("❌ Не удалось получить информацию о матчах.")
+        return
+    
+    text = "⚽️ Сегодняшние матчи:\n\n"
+    
+    # Группируем матчи по статусу
+    live_matches = [m for m in matches if m['status'] in ['LIVE', 'IN_PLAY', 'PAUSED']]
+    finished_matches = [m for m in matches if m['status'] == 'FINISHED']
+    scheduled_matches = [m for m in matches if m['status'] == 'SCHEDULED']
+    
+    # Сначала выводим текущие матчи
+    if live_matches:
+        text += "🔴 LIVE:\n"
+        for match in live_matches:
+            status_emoji = get_match_status_emoji(match['status'])
+            text += f"{status_emoji} {match['home']} {match['score']} {match['away']} ({match['time']})\n"
+            text += f"🏆 {match['competition']}\n\n"
+    
+    # Затем завершенные
+    if finished_matches:
+        text += "✅ Завершенные:\n"
+        for match in finished_matches:
+            status_emoji = get_match_status_emoji(match['status'])
+            text += f"{status_emoji} {match['home']} {match['score']} {match['away']}\n"
+            text += f"🏆 {match['competition']}\n\n"
+    
+    # И наконец запланированные
+    if scheduled_matches:
+        text += "⏰ Запланированные:\n"
+        for match in scheduled_matches:
+            status_emoji = get_match_status_emoji(match['status'])
+            text += f"{status_emoji} {match['home']} vs {match['away']} ({match['time']})\n"
+            text += f"🏆 {match['competition']}\n\n"
+    
+    keyboard = [
+        [InlineKeyboardButton("🔄 Обновить", callback_data='refresh_matches')],
+        [InlineKeyboardButton("🔙 Назад", callback_data='back_to_main')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await send_long_message(query.message, text, reply_markup=reply_markup, clean_chat=True)
 
 if __name__ == "__main__":
     # Проверяем, не запущен ли уже бот
