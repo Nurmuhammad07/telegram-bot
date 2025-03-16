@@ -672,25 +672,8 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     
-    # Обработка кнопок магазина
-    if query.data.startswith('buy_'):
-        item_id = query.data.split('_')[1]
-        await process_purchase_shop(
-            query, 
-            item_id, 
-            SHOP_ITEMS, 
-            user_currency, 
-            user_items, 
-            user_statuses, 
-            user_nicknames, 
-            user_roles, 
-            update_user_balance, 
-            save_user_data
-        )
-        return
-    
     # Обработка кнопок предсказаний
-    elif query.data.startswith('predict_'):
+    if query.data.startswith('predict_'):
         await process_prediction(update, context)
         return
     
@@ -3137,4 +3120,5 @@ if __name__ == "__main__":
     finally:
         # Удаляем файл блокировки при завершении
         remove_lock()
+        logger.info("Бот остановлен")
         logger.info("Бот остановлен")
