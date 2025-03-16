@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 import pytz
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
 from telegram.ext import ContextTypes
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -160,12 +161,17 @@ async def process_purchase(query: CallbackQuery, item_id: str, SHOP_ITEMS, user_
     if item_id.startswith('role_') and 'role' in item:
         role = item['role']
         
-        # Создаем контекст для обработки выбора роли
-        from telegram.ext import CallbackContext
-        context = CallbackContext.from_update(query, None)
-        context.user_data['awaiting_role_name'] = True
-        context.user_data['target_user_id'] = user_id
-        context.user_data['shop_role_purchase'] = True
+        # Напрямую назначаем роль пользователю
+        user_roles[user_id] = role
+        
+        # Добавляем срок действия роли
+        if 'role_expiry' not in user_items.get(user_id, {}):
+            if user_id not in user_items:
+                user_items[user_id] = {}
+            user_items[user_id]['role_expiry'] = {}
+        
+        # Устанавливаем срок действия роли (30 дней)
+        user_items[user_id]['role_expiry'][role] = int(time.time()) + (item['duration'] * 24 * 60 * 60)
         
         # Отправляем сообщение о покупке
         await query.message.reply_text(
@@ -173,15 +179,21 @@ async def process_purchase(query: CallbackQuery, item_id: str, SHOP_ITEMS, user_
             f"Роль будет действовать {item['duration']} дней."
         )
         
-        # Вызываем обработчик выбора роли
-        from telegram import Update
-        update = Update.de_json(query.to_dict(), None)
-        
-        # Имитируем нажатие на кнопку выбора роли
-        query.data = f"role_{role}"
-        
         # Сохраняем изменения
         save_user_data(user_currency, {}, {}, user_items, user_statuses, user_nicknames, user_roles)
+        
+        # Возвращаемся в магазин
+        try:
+            keyboard = [[InlineKeyboardButton("🔙 Вернуться в магазин", callback_data='shop')]]
+            await query.edit_message_text(
+                f"✅ Вы успешно приобрели роль {item['name']}!\n"
+                f"Роль будет действовать {item['duration']} дней.",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+        except Exception as e:
+            if "Message is not modified" not in str(e):
+                logger.error(f"Ошибка при отображении сообщения о покупке роли: {str(e)}")
+        
         return
     
     elif item_id == 'custom_nickname':
