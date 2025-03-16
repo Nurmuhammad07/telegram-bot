@@ -89,7 +89,23 @@ async def process_purchase(query: CallbackQuery, item_id: str, SHOP_ITEMS, user_
     user_balance = user_currency.get(user_id, 1000)
     
     if user_balance < item['price']:
-        await query.answer(f"❌ Недостаточно монет! Нужно: {item['price']}, у вас: {user_balance}")
+        # Отправляем всплывающее уведомление
+        await query.answer(f"❌ Недостаточно монет!")
+        
+        # Отправляем более заметное сообщение с кнопкой возврата в магазин
+        try:
+            keyboard = [[InlineKeyboardButton("🔙 Вернуться в магазин", callback_data='shop')]]
+            await query.edit_message_text(
+                f"❌ Недостаточно монет для покупки {item['name']}!\n\n"
+                f"💰 Цена товара: {item['price']} монет\n"
+                f"💰 Ваш баланс: {user_balance} монет\n\n"
+                f"Вам не хватает {item['price'] - user_balance} монет.",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+        except Exception as e:
+            # Если не удалось отредактировать сообщение, игнорируем ошибку
+            if "Message is not modified" not in str(e):
+                logger.error(f"Ошибка при отображении сообщения о недостатке монет: {str(e)}")
         return
     
     # Списываем стоимость
