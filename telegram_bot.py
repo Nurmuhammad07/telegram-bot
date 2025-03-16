@@ -322,9 +322,9 @@ def save_user_data(currency_data, predictions_data, names_data, items_data, stat
         # Создаем директорию, если она не существует
         os.makedirs(os.path.dirname(USER_DATA_FILE) or '.', exist_ok=True)
         
-    with open(USER_DATA_FILE, 'w') as f:
-        json.dump(data, f, indent=4)
-        logger.info(f"Данные пользователей успешно сохранены в {USER_DATA_FILE}")
+        with open(USER_DATA_FILE, 'w') as f:
+            json.dump(data, f, indent=4)
+            logger.info(f"Данные пользователей успешно сохранены в {USER_DATA_FILE}")
     except Exception as e:
         logger.error(f"Ошибка при сохранении данных пользователей: {str(e)}")
 
